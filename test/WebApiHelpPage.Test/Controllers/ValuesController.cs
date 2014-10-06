@@ -2,18 +2,23 @@
 
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
+using System.Globalization;
 using System.Net;
 using System.Net.Http;
 using System.Web.Http;
 
 namespace WebApiHelpPageWebHost.UnitTest.Controllers
 {
+    /// <summary>
+    /// Resource for Values.
+    /// </summary>
     public class ValuesController : ApiController
     {
         /// <summary>
         /// Gets all the values.
         /// </summary>
-        /// <returns></returns>
+        /// <returns>A list of values.</returns>
         public IEnumerable<string> Get()
         {
             return new string[] { "value1", "value2" };
@@ -23,7 +28,7 @@ namespace WebApiHelpPageWebHost.UnitTest.Controllers
         /// Gets the value by id.
         /// </summary>
         /// <param name="id">The id.</param>
-        /// <returns></returns>
+        /// <returns>A value string.</returns>
         public string Get(int id)
         {
             return "value";
@@ -33,17 +38,28 @@ namespace WebApiHelpPageWebHost.UnitTest.Controllers
         /// Gets the value by name.
         /// </summary>
         /// <param name="name">The name.</param>
-        /// <returns></returns>
+        /// <returns>A value identified by name.</returns>
         public string Get(string name)
         {
             return "name";
         }
 
         /// <summary>
+        /// Gets the value by the point.
+        /// This is a test for a type with TypeConverter.
+        /// </summary>
+        /// <param name="point">The type defined with TypeConverter.</param>
+        /// <returns>A point string.</returns>
+        public string Get([FromUri]Point point)
+        {
+            return "point";
+        }
+
+        /// <summary>
         /// Create a new value.
         /// </summary>
         /// <param name="value">The value.</param>
-        /// <returns></returns>
+        /// <returns>A response.</returns>
         public HttpResponseMessage Post([FromBody]string value)
         {
             return Request.CreateResponse<string>(HttpStatusCode.OK, "hello");
@@ -86,7 +102,7 @@ namespace WebApiHelpPageWebHost.UnitTest.Controllers
         /// Returns the options.
         /// </summary>
         /// <param name="request">The request.</param>
-        /// <returns></returns>
+        /// <returns>All the options.</returns>
         public string Options(HttpRequestMessage request)
         {
             return "options";
@@ -95,6 +111,69 @@ namespace WebApiHelpPageWebHost.UnitTest.Controllers
         public string[] HeadNoDocumentation(int id)
         {
             return new string[] { "value1", "value2" };
+        }
+
+        /// <summary>
+        /// Resource for nested values.
+        /// </summary>
+        public class NestedValuesController : ApiController
+        {
+            public string[] Get()
+            {
+                return new string[] { "nvalue1", "nvalue2" };
+            }
+        }
+
+        public class PointConverter : TypeConverter
+        {
+            // Overrides the CanConvertFrom method of TypeConverter.
+            // The ITypeDescriptorContext interface provides the context for the
+            // conversion. Typically, this interface is used at design time to 
+            // provide information about the design-time container.
+            public override bool CanConvertFrom(ITypeDescriptorContext context,
+               Type sourceType)
+            {
+                if (sourceType == typeof(string))
+                {
+                    return true;
+                }
+                return base.CanConvertFrom(context, sourceType);
+            }
+            // Overrides the ConvertFrom method of TypeConverter.
+            public override object ConvertFrom(ITypeDescriptorContext context,
+               CultureInfo culture, object value)
+            {
+                if (value is string)
+                {
+                    string[] v = ((string)value).Split(new char[] { ',' });
+                    return new Point(int.Parse(v[0]), int.Parse(v[1]));
+                }
+                return base.ConvertFrom(context, culture, value);
+            }
+            // Overrides the ConvertTo method of TypeConverter.
+            public override object ConvertTo(ITypeDescriptorContext context,
+               CultureInfo culture, object value, Type destinationType)
+            {
+                if (destinationType == typeof(string))
+                {
+                    return ((Point)value).X + "," + ((Point)value).Y;
+                }
+                return base.ConvertTo(context, culture, value, destinationType);
+            }
+        }
+
+        [TypeConverter(typeof(PointConverter))]
+        public class Point
+        {
+            public Point(int x, int y)
+            {
+                X = x;
+                Y = y;
+            }
+
+            public int X { get; set; }
+
+            public int Y { get; set; }
         }
     }
 }

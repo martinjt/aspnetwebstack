@@ -1,6 +1,8 @@
 ﻿// Copyright (c) Microsoft Open Technologies, Inc. All rights reserved. See License.txt in the project root for license information.
 
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
+using System.Net;
 using System.Net.Http;
 using System.Net.Http.Formatting;
 using System.Threading;
@@ -17,6 +19,9 @@ namespace System.Web.Http.ModelBinding
     /// </summary>
     public class FormatterParameterBinding : HttpParameterBinding
     {
+        // Magic key to pass cancellation token through the request property bag to maintain backward compat.
+        private const string CancellationTokenKey = "MS_FormatterParameterBinding_CancellationToken";
+
         private IEnumerable<MediaTypeFormatter> _formatters;
         private string _errorMessage;
 
@@ -63,7 +68,23 @@ namespace System.Web.Http.ModelBinding
             set;
         }
 
-        public virtual Task<object> ReadContentAsync(HttpRequestMessage request, Type type, IEnumerable<MediaTypeFormatter> formatters, IFormatterLogger formatterLogger)
+        public virtual Task<object> ReadContentAsync(HttpRequestMessage request, Type type,
+            IEnumerable<MediaTypeFormatter> formatters, IFormatterLogger formatterLogger)
+        {
+            // Try to get the cancellation token if it is set earlier during the magic handshake
+            // to maintain backward compatibility.
+            object cancellationToken;
+            if (!request.Properties.TryGetValue(CancellationTokenKey, out cancellationToken))
+            {
+                cancellationToken = CancellationToken.None;
+            }
+
+            return ReadContentAsync(request, type, formatters, formatterLogger, (CancellationToken)cancellationToken);
+        }
+
+        [SuppressMessage("Microsoft.Reliability", "CA2000:Dispose objects before losing scope", Justification = "Disposed later")]
+        public virtual Task<object> ReadContentAsync(HttpRequestMessage request, Type type,
+            IEnumerable<MediaTypeFormatter> formatters, IFormatterLogger formatterLogger, CancellationToken cancellationToken)
         {
             HttpContent content = request.Content;
             if (content == null)
@@ -75,33 +96,59 @@ namespace System.Web.Http.ModelBinding
                 }
                 else
                 {
-                    return TaskHelpers.FromResult(defaultValue);
+                    return Task.FromResult(defaultValue);
                 }
             }
-            return content.ReadAsAsync(type, formatters, formatterLogger);
+
+            try
+            {
+                return content.ReadAsAsync(type, formatters, formatterLogger, cancellationToken);
+            }
+            catch (UnsupportedMediaTypeException exception)
+            {
+                // If there is no Content-Type header, provide a better error message
+                string errorFormat = content.Headers.ContentType == null ?
+                    SRResources.UnsupportedMediaTypeNoContentType :
+                    SRResources.UnsupportedMediaType;
+
+                throw new HttpResponseException(
+                    request.CreateErrorResponse(
+                        HttpStatusCode.UnsupportedMediaType,
+                        Error.Format(errorFormat, exception.MediaType.MediaType),
+                        exception));
+            }
         }
 
-        public override Task ExecuteBindingAsync(ModelMetadataProvider metadataProvider, HttpActionContext actionContext, CancellationToken cancellationToken)
+        public override Task ExecuteBindingAsync(ModelMetadataProvider metadataProvider, HttpActionContext actionContext,
+            CancellationToken cancellationToken)
         {
             HttpParameterDescriptor paramFromBody = this.Descriptor;
             Type type = paramFromBody.ParameterType;
             HttpRequestMessage request = actionContext.ControllerContext.Request;
             IFormatterLogger formatterLogger = new ModelStateFormatterLogger(actionContext.ModelState, paramFromBody.ParameterName);
-            Task<object> task = ReadContentAsync(request, type, _formatters, formatterLogger);
 
-            return task.Then(
-                (model) =>
-                {
-                    // Put the parameter result into the action context.
-                    SetValue(actionContext, model);
+            return ExecuteBindingAsyncCore(metadataProvider, actionContext, paramFromBody, type, request, formatterLogger, cancellationToken);
+        }
 
-                    // validate the object graph. 
-                    // null indicates we want no body parameter validation
-                    if (BodyModelValidator != null)
-                    {
-                        BodyModelValidator.Validate(model, type, metadataProvider, actionContext, paramFromBody.ParameterName);
-                    }
-                });
+        // Perf-sensitive - keeping the async method as small as possible
+        private async Task ExecuteBindingAsyncCore(ModelMetadataProvider metadataProvider, HttpActionContext actionContext,
+            HttpParameterDescriptor paramFromBody, Type type, HttpRequestMessage request, IFormatterLogger formatterLogger,
+            CancellationToken cancellationToken)
+        {
+            // pass the cancellation token through the request as we cannot call the ReadContentAsync overload that takes
+            // CancellationToken for backword compatibility reasons.
+            request.Properties[CancellationTokenKey] = cancellationToken;
+            object model = await ReadContentAsync(request, type, _formatters, formatterLogger);
+
+            // Put the parameter result into the action context.
+            SetValue(actionContext, model);
+
+            // validate the object graph.
+            // null indicates we want no body parameter validation
+            if (BodyModelValidator != null)
+            {
+                BodyModelValidator.Validate(model, type, metadataProvider, actionContext, paramFromBody.ParameterName);
+            }
         }
     }
 }

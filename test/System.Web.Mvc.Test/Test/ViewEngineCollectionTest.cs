@@ -44,6 +44,92 @@ namespace System.Web.Mvc.Test
         }
 
         [Fact]
+        public void ViewEngineCollectionCombinedItemsCaches()
+        {
+            // Arrange
+            var engines = new IViewEngine[] 
+            {
+                new Mock<IViewEngine>(MockBehavior.Strict).Object, 
+                new Mock<IViewEngine>(MockBehavior.Strict).Object
+            };
+            var collection = new ViewEngineCollection(engines);
+
+            // Act
+            var combined1 = collection.CombinedItems;
+            var combined2 = collection.CombinedItems;
+
+            // Assert
+            Assert.Equal(engines, combined1);
+            Assert.Same(combined1, combined2);
+        }
+
+        [Fact]
+        public void ViewEngineCollectionCombinedItemsClearResetsCache()
+        {
+            TestCacheReset((collection) => collection.Clear());
+        }
+
+        [Fact]
+        public void ViewEngineCollectionCombinedItemsInsertResetsCache()
+        {
+            TestCacheReset((collection) => collection.Insert(0, new Mock<IViewEngine>(MockBehavior.Strict).Object));
+        }
+
+        [Fact]
+        public void ViewEngineCollectionCombinedItemsRemoveResetsCache()
+        {
+            TestCacheReset((collection) => collection.RemoveAt(0));
+        }
+
+        [Fact]
+        public void ViewEngineCollectionCombinedItemsSetResetsCache()
+        {
+            TestCacheReset((collection) => collection[0] = new Mock<IViewEngine>(MockBehavior.Strict).Object);
+        }
+
+        private static void TestCacheReset(Action<ViewEngineCollection> mutatingAction)
+        {
+            // Arrange
+            var providers = new List<IViewEngine>() 
+            {
+                new Mock<IViewEngine>(MockBehavior.Strict).Object, 
+                new Mock<IViewEngine>(MockBehavior.Strict).Object
+            };
+            var collection = new ViewEngineCollection(providers);
+
+            // Act
+            mutatingAction(collection);
+
+            IViewEngine[] combined = collection.CombinedItems;
+
+            // Assert
+            Assert.Equal(providers, combined);
+        }
+
+        [Fact]
+        public void ViewEngineCollectionCombinedItemsDelegatesToResolver()
+        {
+            // Arrange
+            var firstEngine = new Mock<IViewEngine>();
+            var secondEngine = new Mock<IViewEngine>();
+            var thirdEngine = new Mock<IViewEngine>();
+            var dependencyEngines = new IViewEngine[] { firstEngine.Object, secondEngine.Object };
+            var collectionEngines = new IViewEngine[] { thirdEngine.Object };
+            var expectedEngines = new IViewEngine[] { firstEngine.Object, secondEngine.Object, thirdEngine.Object };
+
+            var resolver = new Mock<IDependencyResolver>();
+            resolver.Setup(r => r.GetServices(typeof(IViewEngine))).Returns(dependencyEngines);
+
+            var engines = new ViewEngineCollection(collectionEngines, resolver.Object);
+
+            // Act
+            IViewEngine[] combined = engines.CombinedItems;
+
+            // Assert
+            Assert.Equal(expectedEngines, combined);
+        }
+
+        [Fact]
         public void AddNullViewEngineThrows()
         {
             // Arrange
@@ -596,8 +682,11 @@ namespace System.Web.Mvc.Test
             locatedEngine.Setup(e => e.FindView(context, "ViewName", "MasterName", true))
                 .Returns(engineResult);
             Mock<IViewEngine> secondEngine = new Mock<IViewEngine>();
-            Resolver<IEnumerable<IViewEngine>> resolver = new Resolver<IEnumerable<IViewEngine>> { Current = new IViewEngine[] { locatedEngine.Object, secondEngine.Object } };
-            ViewEngineCollection engines = new ViewEngineCollection(resolver);
+
+            var resolver = new Mock<IDependencyResolver>();
+            resolver.Setup(r => r.GetServices(typeof(IViewEngine))).Returns(new IViewEngine[] { locatedEngine.Object, secondEngine.Object });
+
+            ViewEngineCollection engines = new ViewEngineCollection(new IViewEngine[0], resolver.Object);
 
             // Act
             ViewEngineResult result = engines.FindView(context, "ViewName", "MasterName");
@@ -618,8 +707,11 @@ namespace System.Web.Mvc.Test
             locatedEngine.Setup(e => e.FindPartialView(context, "ViewName", true))
                 .Returns(engineResult);
             Mock<IViewEngine> secondEngine = new Mock<IViewEngine>();
-            Resolver<IEnumerable<IViewEngine>> resolver = new Resolver<IEnumerable<IViewEngine>> { Current = new IViewEngine[] { locatedEngine.Object, secondEngine.Object } };
-            ViewEngineCollection engines = new ViewEngineCollection(resolver);
+
+            var resolver = new Mock<IDependencyResolver>();
+            resolver.Setup(r => r.GetServices(typeof(IViewEngine))).Returns(new IViewEngine[] { locatedEngine.Object, secondEngine.Object });
+
+            ViewEngineCollection engines = new ViewEngineCollection(new IViewEngine[0], resolver.Object);
 
             // Act
             ViewEngineResult result = engines.FindPartialView(context, "ViewName");

@@ -3,13 +3,14 @@
 using System.Collections.Generic;
 using System.Diagnostics.Contracts;
 using System.Web.Http.Filters;
+using System.Web.Http.Services;
 
 namespace System.Web.Http.Tracing.Tracers
 {
     /// <summary>
     /// Base class and helper for the creation of filter tracers.
     /// </summary>
-    internal class FilterTracer : IFilter
+    internal class FilterTracer : IFilter, IDecorator<IFilter>
     {
         public FilterTracer(IFilter innerFilter, ITraceWriter traceWriter)
         {
@@ -18,6 +19,11 @@ namespace System.Web.Http.Tracing.Tracers
 
             InnerFilter = innerFilter;
             TraceWriter = traceWriter;
+        }
+
+        public IFilter Inner
+        {
+            get { return InnerFilter; }
         }
 
         public IFilter InnerFilter { get; set; }
@@ -71,11 +77,23 @@ namespace System.Web.Http.Tracing.Tracers
                 filters.Add(new AuthorizationFilterTracer(authorizationFilter, traceWriter));
             }
 
+            IAuthenticationFilter authenticationFilter = filter as IAuthenticationFilter;
+            if (authenticationFilter != null)
+            {
+                filters.Add(new AuthenticationFilterTracer(authenticationFilter, traceWriter));
+            }
+
             // Do not add an IExceptionFilter tracer if we already added an ExceptoinFilterAttribute tracer
             IExceptionFilter exceptionFilter = filter as IExceptionFilter;
             if (exceptionFilter != null && !addedExceptionAttributeTracer)
             {
                 filters.Add(new ExceptionFilterTracer(exceptionFilter, traceWriter));
+            }
+
+            IOverrideFilter overrideFilter = filter as IOverrideFilter;
+            if (overrideFilter != null)
+            {
+                filters.Add(new OverrideFilterTracer(overrideFilter, traceWriter));
             }
 
             if (filters.Count == 0)

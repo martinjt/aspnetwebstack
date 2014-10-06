@@ -19,7 +19,17 @@ namespace System.Web.Mvc
 
         public virtual bool ContainsPrefix(string prefix)
         {
-            return this.Any(vp => vp.ContainsPrefix(prefix));
+            // Performance sensitive, so avoid Linq and delegates
+            // Saving Count is faster for looping over Collection<T>
+            int itemCount = Count;
+            for (int i = 0; i < itemCount; i++)
+            {
+                if (this[i].ContainsPrefix(prefix))
+                {
+                    return true;
+                }
+            }
+            return false;
         }
 
         public virtual ValueProviderResult GetValue(string key)
@@ -29,10 +39,18 @@ namespace System.Web.Mvc
 
         public virtual ValueProviderResult GetValue(string key, bool skipValidation)
         {
-            return (from provider in this
-                    let result = GetValueFromProvider(provider, key, skipValidation)
-                    where result != null
-                    select result).FirstOrDefault();
+            // Performance sensitive.
+            // Caching the count is faster for Collection<T>
+            int providerCount = Count;
+            for (int i = 0; i < providerCount; i++)
+            {
+                ValueProviderResult result = GetValueFromProvider(this[i], key, skipValidation);
+                if (result != null)
+                {
+                    return result;
+                }
+            }
+            return null;
         }
 
         public virtual IDictionary<string, string> GetKeysFromPrefix(string prefix)

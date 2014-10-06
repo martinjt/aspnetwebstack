@@ -61,55 +61,32 @@ namespace System.Web.Http.Dispatcher
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             // Lookup route data, or if not found as a request property then we look it up in the route table
-            IHttpRouteData routeData;
-            if (!request.Properties.TryGetValue(HttpPropertyKeys.HttpRouteDataKey, out routeData))
+            IHttpRouteData routeData = request.GetRouteData();
+            if (routeData == null)
             {
                 routeData = _configuration.Routes.GetRouteData(request);
                 if (routeData != null)
                 {
-                    request.Properties.Add(HttpPropertyKeys.HttpRouteDataKey, routeData);
-                }
-                else
-                {
-                    return TaskHelpers.FromResult(request.CreateErrorResponse(
-                        HttpStatusCode.NotFound,
-                        Error.Format(SRResources.ResourceNotFound, request.RequestUri),
-                        SRResources.NoRouteData));
+                    request.SetRouteData(routeData);
                 }
             }
 
-            RemoveOptionalRoutingParameters(routeData.Values);
+            if (routeData == null || (routeData.Route != null && routeData.Route.Handler is StopRoutingHandler))
+            {
+                request.Properties.Add(HttpPropertyKeys.NoRouteMatched, true);
+                return Task.FromResult(request.CreateErrorResponse(
+                    HttpStatusCode.NotFound,
+                    Error.Format(SRResources.ResourceNotFound, request.RequestUri),
+                    SRResources.NoRouteData));
+            }
+
+            routeData.RemoveOptionalRoutingParameters();
 
             // routeData.Route could be null if user adds a custom route that derives from System.Web.Routing.Route explicitly 
             // and add that to the RouteCollection in the web hosted case
-            var invoker = (routeData.Route == null || routeData.Route.Handler == null) ? 
+            var invoker = (routeData.Route == null || routeData.Route.Handler == null) ?
                 _defaultInvoker : new HttpMessageInvoker(routeData.Route.Handler, disposeHandler: false);
             return invoker.SendAsync(request, cancellationToken);
-        }
-
-        private static void RemoveOptionalRoutingParameters(IDictionary<string, object> routeValueDictionary)
-        {
-            Contract.Assert(routeValueDictionary != null);
-
-            // Get all keys for which the corresponding value is 'Optional'.
-            // Having a separate array is necessary so that we don't manipulate the dictionary while enumerating.
-            // This is on a hot-path and linq expressions are showing up on the profile, so do array manipulation.
-            int max = routeValueDictionary.Count;
-            int i = 0;
-            string[] matching = new string[max];
-            foreach (KeyValuePair<string, object> kv in routeValueDictionary)
-            {
-                if (kv.Value == RouteParameter.Optional)
-                {
-                    matching[i] = kv.Key;
-                    i++;
-                }
-            }
-            for (int j = 0; j < i; j++)
-            {
-                string key = matching[j];
-                routeValueDictionary.Remove(key);
-            }
-        }
+        }       
     }
 }

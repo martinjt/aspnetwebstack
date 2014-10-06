@@ -3,6 +3,7 @@
 using System.Collections.ObjectModel;
 using System.Net.Http;
 using System.Web.Http.Controllers;
+using System.Web.Http.Services;
 using Microsoft.TestCommon;
 using Moq;
 
@@ -29,7 +30,7 @@ namespace System.Web.Http.Tracing.Tracers
             _actionContext = ContextUtil.CreateActionContext(_controllerContext, actionDescriptor: _mockActionDescriptor.Object);
         }
 
-        [Fact] 
+        [Fact]
         public void SelectAction_Traces_And_Returns_ActionDescriptor_Tracer()
         {
             // Arrange
@@ -52,6 +53,23 @@ namespace System.Web.Http.Tracing.Tracers
             Assert.IsAssignableFrom<HttpActionDescriptorTracer>(selectedActionDescriptor);
         }
 
+        [Fact]
+        public void SelectAction_DoesNotWrapHttpActionDescriptorTracer()
+        {
+            // Arrange
+            TestTraceWriter traceWriter = new TestTraceWriter();
+            Mock<IHttpActionSelector> mockSelector = new Mock<IHttpActionSelector>();
+
+            HttpActionDescriptorTracer actionDescriptorTracer = new HttpActionDescriptorTracer(_controllerContext, _mockActionDescriptor.Object, traceWriter);
+            mockSelector.Setup(s => s.SelectAction(_controllerContext)).Returns(actionDescriptorTracer);
+            HttpActionSelectorTracer tracer = new HttpActionSelectorTracer(mockSelector.Object, traceWriter);
+
+            // Act
+            HttpActionDescriptor selectedActionDescriptor = ((IHttpActionSelector)tracer).SelectAction(_controllerContext);
+
+            // Assert
+            Assert.Same(actionDescriptorTracer, selectedActionDescriptor);
+        }
 
         [Fact]
         public void SelectAction_Traces_And_Throws_Exception_Thrown_From_Inner()
@@ -76,6 +94,34 @@ namespace System.Web.Http.Tracing.Tracers
             Assert.Equal<TraceRecord>(expectedTraces, traceWriter.Traces, new TraceRecordComparer());
             Assert.Same(exception, thrown);
             Assert.Same(exception, traceWriter.Traces[1].Exception);
+        }
+
+        [Fact]
+        public void Inner_Property_On_HttpActionSelectorTracer_Returns_IHttpActionSelector()
+        {
+            // Arrange
+            IHttpActionSelector expectedInner = new Mock<IHttpActionSelector>().Object;
+            HttpActionSelectorTracer productUnderTest = new HttpActionSelectorTracer(expectedInner, new TestTraceWriter());
+
+            // Act
+            IHttpActionSelector actualInner = productUnderTest.Inner;
+
+            // Assert
+            Assert.Same(expectedInner, actualInner);
+        }
+
+        [Fact]
+        public void Decorator_GetInner_On_HttpActionSelectorTracer_Returns_IHttpActionSelector()
+        {
+            // Arrange
+            IHttpActionSelector expectedInner = new Mock<IHttpActionSelector>().Object;
+            HttpActionSelectorTracer productUnderTest = new HttpActionSelectorTracer(expectedInner, new TestTraceWriter());
+
+            // Act
+            IHttpActionSelector actualInner = Decorator.GetInner(productUnderTest as IHttpActionSelector);
+
+            // Assert
+            Assert.Same(expectedInner, actualInner);
         }
     }
 }

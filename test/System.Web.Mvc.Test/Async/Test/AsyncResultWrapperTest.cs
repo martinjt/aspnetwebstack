@@ -17,20 +17,88 @@ namespace System.Web.Mvc.Async.Test
             IAsyncResult innerResult = new MockAsyncResult();
 
             // Act
-            IAsyncResult outerResult = AsyncResultWrapper.Begin(
+            IAsyncResult outerResult = AsyncResultWrapper.Begin<object>(
                 ar => { resultGivenToCallback = ar; },
                 null,
-                (callback, state) =>
+                (callback, callbackState, state) =>
                 {
                     capturedCallback = callback;
                     return innerResult;
                 },
-                ar => { });
+                (ar, state) => { },
+                null);
 
             capturedCallback(innerResult);
 
             // Assert
             Assert.Equal(outerResult, resultGivenToCallback);
+        }
+
+        [Fact]
+        public void Begin_AsynchronousCompletionWithState()
+        {
+            // Arrange
+            IAsyncResult innerResult = new MockAsyncResult();
+            object invokeState = new object();
+            object capturedBeginState = null;
+            object capturedEndState = null;
+
+            // Act
+            IAsyncResult outerResult = AsyncResultWrapper.Begin(
+                null,
+                null,
+                (AsyncCallback callback, object callbackState, object innerInvokeState) =>
+                {
+                    capturedBeginState = innerInvokeState;
+                    return innerResult;
+                },
+                (IAsyncResult result, object innerInvokeState) =>
+                {
+                    capturedEndState = innerInvokeState;
+                },
+                invokeState,
+                null,
+                Timeout.Infinite);
+            AsyncResultWrapper.End(outerResult);
+
+            // Assert
+            Assert.Same(invokeState, capturedBeginState);
+            Assert.Same(invokeState, capturedEndState);
+        }
+
+        [Fact]
+        public void Begin_AsynchronousCompletionWithStateAndResult()
+        {
+            // Arrange
+            IAsyncResult innerResult = new MockAsyncResult();
+            object invokeState = new object();
+            object capturedBeginState = null;
+            object capturedEndState = null;
+            object expectedRetun = new object();
+
+            // Act
+            IAsyncResult outerResult = AsyncResultWrapper.Begin(
+                null,
+                null,
+                (AsyncCallback callback, object callbackState, object innerInvokeState) =>
+                {
+                    capturedBeginState = innerInvokeState;
+                    return innerResult;
+                },
+                (IAsyncResult result, object innerInvokeState) =>
+                {
+                    capturedEndState = innerInvokeState;
+                    return expectedRetun;
+                },
+                invokeState,
+                null,
+                Timeout.Infinite);
+            object endResult = AsyncResultWrapper.End<object>(outerResult);
+
+            // Assert
+            Assert.Same(expectedRetun, endResult);
+            Assert.Same(invokeState, capturedBeginState);
+            Assert.Same(invokeState, capturedEndState);
         }
 
         [Fact]
@@ -45,10 +113,11 @@ namespace System.Web.Mvc.Async.Test
             };
 
             // Act
-            IAsyncResult outerResult = AsyncResultWrapper.Begin(
+            IAsyncResult outerResult = AsyncResultWrapper.Begin<object>(
                 null, "outer state",
-                (callback, state) => innerResult,
-                ar => { });
+                (callback, callbackState, state) => innerResult,
+                (ar, state) => { },
+                null);
 
             // Assert
             Assert.Equal(innerResult.AsyncState, outerResult.AsyncState);
@@ -65,15 +134,16 @@ namespace System.Web.Mvc.Async.Test
             IAsyncResult innerResult = new MockAsyncResult();
 
             // Act
-            IAsyncResult outerResult = AsyncResultWrapper.Begin(
+            IAsyncResult outerResult = AsyncResultWrapper.Begin<object>(
                 ar => { resultGivenToCallback = ar; },
                 null,
-                (callback, state) =>
+                (callback, callbackState, state) =>
                 {
                     callback(innerResult);
                     return innerResult;
                 },
-                ar => { });
+                (ar, state)  => { },
+                null);
 
             // Assert
             Assert.Equal(outerResult, resultGivenToCallback);
@@ -88,18 +158,205 @@ namespace System.Web.Mvc.Async.Test
             innerResultMock.Setup(ir => ir.IsCompleted).Returns(true);
 
             // Act
-            IAsyncResult outerResult = AsyncResultWrapper.Begin(
+            IAsyncResult outerResult = AsyncResultWrapper.Begin<object>(
                 null,
                 null,
-                (callback, state) =>
+                (callback, callbackState, state) =>
                 {
                     callback(innerResultMock.Object);
                     return innerResultMock.Object;
                 },
-                ar => { });
+                (ar, state) => { },
+                null);
 
             // Assert
             Assert.True(outerResult.CompletedSynchronously);
+        }
+
+        [Fact]
+        public void Begin_WithCallbackSyncContext_CallsSendIfOperationCompletedAsynchronously()
+        {
+            // Arrange
+            MockAsyncResult asyncResult = new MockAsyncResult()
+            {
+                CompletedSynchronously = false,
+                IsCompleted = false
+            };
+            bool originalCallbackCalled = false;
+            IAsyncResult passedAsyncResult = null;
+            AsyncCallback passedCallback = null;
+            AsyncCallback originalCallback = ar =>
+            {
+                originalCallbackCalled = true;
+                passedAsyncResult = ar;
+            };
+            object originalState = new object();
+            DummySynchronizationContext syncContext = new DummySynchronizationContext();
+
+            // Act
+            IAsyncResult outerResult = AsyncResultWrapper.Begin<object>(
+                 originalCallback,
+                 originalState,
+                 (callback, callbackState, state) =>
+                 {
+                     passedCallback = callback;
+                     asyncResult.AsyncState = callbackState;
+                     return asyncResult;
+                 },
+                 (ar, state) => {
+                     asyncResult.IsCompleted = true;
+                     passedCallback(ar); 
+                 },
+                 null,
+                 callbackSyncContext: syncContext);
+            AsyncResultWrapper.End(outerResult);
+
+            // Assert
+            Assert.True(originalCallbackCalled);
+            Assert.False(passedAsyncResult.CompletedSynchronously);
+            Assert.True(passedAsyncResult.IsCompleted);
+            Assert.Same(originalState, passedAsyncResult.AsyncState);
+            Assert.True(syncContext.SendCalled);
+        }
+
+        [Fact]
+        public void Begin_WithCallbackSyncContext_DoesNotCallSendIfOperationCompletedSynchronously()
+        {
+            // Arrange
+            MockAsyncResult asyncResult = new MockAsyncResult()
+            {
+                CompletedSynchronously = true,
+                IsCompleted = true
+            };
+            bool originalCallbackCalled = false;
+            IAsyncResult passedAsyncResult = null;
+            AsyncCallback originalCallback = ar =>
+            {
+                passedAsyncResult = ar;
+                originalCallbackCalled = true;
+            };
+            object originalState = new object();
+
+            DummySynchronizationContext syncContext = new DummySynchronizationContext();
+
+            // Act
+            IAsyncResult outerResult = AsyncResultWrapper.Begin<object>(
+                originalCallback,
+                originalState,
+                (callback, callbackState, state) =>
+                {
+                    asyncResult.AsyncState = callbackState;
+                    return asyncResult;
+                },
+                (ar, state) => { },
+                null,
+                callbackSyncContext: syncContext);
+
+            // Assert
+            Assert.True(originalCallbackCalled);
+            Assert.True(passedAsyncResult.CompletedSynchronously);
+            Assert.True(passedAsyncResult.IsCompleted);
+            Assert.Same(originalState, passedAsyncResult.AsyncState);
+            Assert.False(syncContext.SendCalled);
+        }
+
+        [Fact]
+        public void Begin_WithCallbackSyncContext_ThrowsAsyncEvenIfSendContextCaptures()
+        {
+            // Arrange
+            InvalidOperationException exception = new InvalidOperationException("Some exception text.");
+            CapturingSynchronizationContext capturingSyncContext = new CapturingSynchronizationContext();
+            MockAsyncResult asyncResult = new MockAsyncResult()
+            {
+                CompletedSynchronously = false,
+                IsCompleted = true
+            };
+
+            bool originalCallbackCalled = false;
+            IAsyncResult passedAsyncResult = null;
+            AsyncCallback passedCallback = null;
+            AsyncCallback originalCallback = ar =>
+            {
+                passedAsyncResult = ar;
+                originalCallbackCalled = true;
+                throw exception;
+            };
+
+            // Act & Assert
+            IAsyncResult outerResult = AsyncResultWrapper.Begin<object>(
+                 originalCallback,
+                 null,
+                 (callback, callbackState, state) =>
+                 {
+                     passedCallback = callback;
+                     asyncResult.AsyncState = callbackState;
+                     return asyncResult;
+                 },
+                 (ar, state) =>
+                 {
+                     asyncResult.IsCompleted = true;
+                     passedCallback(ar);
+                 },
+                 null,
+                 callbackSyncContext: capturingSyncContext);
+            SynchronousOperationException thrownException = Assert.Throws<SynchronousOperationException>(
+                delegate
+                {
+                    AsyncResultWrapper.End(outerResult);
+                },
+                @"An operation that crossed a synchronization context failed. See the inner exception for more information.");
+
+            // Assert
+            Assert.Equal(exception, thrownException.InnerException);
+            Assert.True(originalCallbackCalled);
+            Assert.False(passedAsyncResult.CompletedSynchronously);
+            Assert.True(capturingSyncContext.SendCalled);
+        }
+
+        [Fact]
+        public void Begin_WithCallbackSyncContext_ThrowsSynchronous()
+        {
+            // Arrange
+            InvalidOperationException exception = new InvalidOperationException("Some exception text.");
+            CapturingSynchronizationContext capturingSyncContext = new CapturingSynchronizationContext();
+            MockAsyncResult asyncResult = new MockAsyncResult()
+            {
+                CompletedSynchronously = true,
+                IsCompleted = true
+            };
+
+            bool originalCallbackCalled = false;
+            IAsyncResult passedAsyncResult = null;
+            AsyncCallback originalCallback = ar =>
+            {
+                passedAsyncResult = ar;
+                originalCallbackCalled = true;
+                throw exception;
+            };
+
+            // Act & Assert
+            InvalidOperationException thrownException = Assert.Throws<InvalidOperationException>(
+                delegate 
+                {
+                    AsyncResultWrapper.Begin<object>(
+                        originalCallback,
+                        null,
+                        (callback, callbackState, state) =>
+                        {
+                            asyncResult.AsyncState = callbackState;
+                            return asyncResult;
+                        },
+                        (ar, state) => { },
+                        null,
+                        callbackSyncContext: capturingSyncContext);
+                },
+                exception.Message);
+
+            // Assert
+            Assert.Equal(exception, thrownException);
+            Assert.True(originalCallbackCalled);
+            Assert.True(passedAsyncResult.CompletedSynchronously);
+            Assert.False(capturingSyncContext.SendCalled);
         }
 
         [Fact]
@@ -109,7 +366,7 @@ namespace System.Web.Mvc.Async.Test
             bool actionCalled = false;
 
             // Act
-            IAsyncResult asyncResult = AsyncResultWrapper.BeginSynchronous(null, null, delegate { actionCalled = true; });
+            IAsyncResult asyncResult = AsyncResultWrapper.BeginSynchronous(callback: null, state: null, action: delegate { actionCalled = true; }, tag: null);
             AsyncResultWrapper.End(asyncResult);
 
             // Assert
@@ -121,14 +378,43 @@ namespace System.Web.Mvc.Async.Test
         [Fact]
         public void BeginSynchronous_Func()
         {
+            object expectedReturn = new object();
+            object expectedState = new object();
+            object expectedCallbackState = new object();
+            bool funcCalled = false;
+            bool asyncCalledbackCalled = false;
+
             // Act
-            IAsyncResult asyncResult = AsyncResultWrapper.BeginSynchronous(null, null, () => 42);
-            int retVal = AsyncResultWrapper.End<int>(asyncResult);
+            IAsyncResult asyncResult = AsyncResultWrapper.BeginSynchronous(
+                callback: (innerIAsyncResult) =>
+                {
+                    asyncCalledbackCalled = true;
+                    Assert.NotNull(innerIAsyncResult);
+                    Assert.Same(expectedCallbackState, innerIAsyncResult.AsyncState);
+                    Assert.True(innerIAsyncResult.IsCompleted);
+                    Assert.True(innerIAsyncResult.CompletedSynchronously);
+                },
+                callbackState: expectedCallbackState,
+                func: (innerIAsyncResult, innerState) =>
+                {
+                    funcCalled = true;
+                    Assert.NotNull(innerIAsyncResult);
+                    Assert.Same(expectedCallbackState, innerIAsyncResult.AsyncState);
+                    Assert.Same(expectedState, innerState);
+                    Assert.True(innerIAsyncResult.IsCompleted);
+                    Assert.True(innerIAsyncResult.CompletedSynchronously);
+                    return expectedReturn;
+                },
+                funcState: expectedState,
+                tag: null);
+            object retVal = AsyncResultWrapper.End<object>(asyncResult);
 
             // Assert
-            Assert.Equal(42, retVal);
+            Assert.Same(expectedReturn, retVal);
             Assert.True(asyncResult.IsCompleted);
             Assert.True(asyncResult.CompletedSynchronously);
+            Assert.True(funcCalled);
+            Assert.True(asyncCalledbackCalled);
         }
 
         [Fact]
@@ -151,10 +437,11 @@ namespace System.Web.Mvc.Async.Test
         public void End_ThrowsIfAsyncResultIsIncorrectType()
         {
             // Arrange
-            IAsyncResult asyncResult = AsyncResultWrapper.Begin(
+            IAsyncResult asyncResult = AsyncResultWrapper.Begin<object>(
                 null, null,
-                (callback, state) => new MockAsyncResult(),
-                ar => { });
+                (callback, callbackState, state) => new MockAsyncResult(),
+                (ar, state) => { },
+                null);
 
             // Act & assert
             Assert.Throws<ArgumentException>(
@@ -175,10 +462,11 @@ namespace System.Web.Mvc.Async.Test
         public void End_ThrowsIfAsyncResultTagMismatch()
         {
             // Arrange
-            IAsyncResult asyncResult = AsyncResultWrapper.Begin(
+            IAsyncResult asyncResult = AsyncResultWrapper.Begin<object>(
                 null, null,
-                (callback, state) => new MockAsyncResult(),
-                ar => { },
+                (callback, callbackState, state) => new MockAsyncResult(),
+                (ar, state) => { },
+                null, 
                 "some tag");
 
             // Act & assert
@@ -192,10 +480,11 @@ namespace System.Web.Mvc.Async.Test
         public void End_ThrowsIfCalledTwiceOnSameAsyncResult()
         {
             // Arrange
-            IAsyncResult asyncResult = AsyncResultWrapper.Begin(
+            IAsyncResult asyncResult = AsyncResultWrapper.Begin<object>(
                 null, null,
-                (callback, state) => new MockAsyncResult(),
-                ar => { });
+                (callback, callbackState, state) => new MockAsyncResult(),
+                (ar, state) => { }, 
+                null);
 
             // Act & assert
             AsyncResultWrapper.End(asyncResult);
@@ -213,10 +502,11 @@ namespace System.Web.Mvc.Async.Test
             AsyncCallback callback = ar => { waitHandle.Set(); };
 
             // Act & assert
-            IAsyncResult asyncResult = AsyncResultWrapper.Begin(
+            IAsyncResult asyncResult = AsyncResultWrapper.Begin<object>(
                 callback, null,
-                (innerCallback, innerState) => new MockAsyncResult(),
-                ar => { Assert.True(false, "This callback should never execute since we timed out."); },
+                (innerCallback, callbackState, state) => new MockAsyncResult(),
+                (ar, state) => { Assert.True(false, "This callback should never execute since we timed out."); },
+                null,
                 null, 0);
 
             // wait for the timeout
@@ -225,6 +515,35 @@ namespace System.Web.Mvc.Async.Test
             Assert.True(asyncResult.IsCompleted);
             Assert.Throws<TimeoutException>(
                 delegate { AsyncResultWrapper.End(asyncResult); });
+        }
+
+        private class DummySynchronizationContext : SynchronizationContext
+        {
+            public bool SendCalled { get; private set; }
+
+            public override void Send(SendOrPostCallback d, object state)
+            {
+                SendCalled = true;
+                base.Send(d, state);
+            }
+        }
+
+        private class CapturingSynchronizationContext : SynchronizationContext
+        {
+            public bool SendCalled { get; private set; }
+
+            public override void Send(SendOrPostCallback d, object state)
+            {
+                try
+                {
+                    SendCalled = true;
+                    d(state);
+                }
+                catch
+                {
+                    // swallow exceptions, just like AspNetSynchronizationContext
+                }
+            }
         }
     }
 }

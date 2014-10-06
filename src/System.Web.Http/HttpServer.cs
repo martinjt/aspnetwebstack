@@ -1,13 +1,16 @@
 ﻿// Copyright (c) Microsoft Open Technologies, Inc. All rights reserved. See License.txt in the project root for license information.
 
+using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Net;
 using System.Net.Http;
+using System.Runtime.ExceptionServices;
 using System.Security.Principal;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Web.Http.Controllers;
 using System.Web.Http.Dispatcher;
-using System.Web.Http.Hosting;
+using System.Web.Http.ExceptionHandling;
 using System.Web.Http.Properties;
 
 namespace System.Web.Http
@@ -18,9 +21,14 @@ namespace System.Web.Http
     /// </summary>
     public class HttpServer : DelegatingHandler
     {
-        private static readonly Lazy<IPrincipal> _anonymousPrincipal = new Lazy<IPrincipal>(() => new GenericPrincipal(new GenericIdentity(String.Empty), new string[0]), isThreadSafe: true);
+        // _anonymousPrincipal needs thread-safe intialization so use a static field initializer
+        private static readonly IPrincipal _anonymousPrincipal = new GenericPrincipal(new GenericIdentity(String.Empty), new string[0]);
+
         private readonly HttpConfiguration _configuration;
         private readonly HttpMessageHandler _dispatcher;
+
+        private IExceptionLogger _exceptionLogger;
+        private IExceptionHandler _exceptionHandler;
         private bool _disposed;
         private bool _initialized = false;
         private object _initializationLock = new object();
@@ -63,6 +71,8 @@ namespace System.Web.Http
         /// </summary>
         /// <param name="configuration">The <see cref="HttpConfiguration"/> used to configure this <see cref="HttpServer"/> instance.</param>
         /// <param name="dispatcher">Http dispatcher responsible for handling incoming requests.</param>
+        [SuppressMessage("Microsoft.Performance", "CA1804:RemoveUnusedLocals", MessageId = "principal",
+            Justification = "Must access Thread.CurrentPrincipal to work around problem in .NET 4.5")]
         public HttpServer(HttpConfiguration configuration, HttpMessageHandler dispatcher)
         {
             if (configuration == null)
@@ -74,6 +84,10 @@ namespace System.Web.Http
             {
                 throw Error.ArgumentNull("dispatcher");
             }
+
+            // Read the thread principal to work around a problem up to .NET 4.5.1 that CurrentPrincipal creates a new instance each time it is read in async 
+            // code if it has not been queried from the spawning thread.
+            IPrincipal principal = Thread.CurrentPrincipal;
 
             _dispatcher = dispatcher;
             _configuration = configuration;
@@ -93,6 +107,42 @@ namespace System.Web.Http
         public HttpConfiguration Configuration
         {
             get { return _configuration; }
+        }
+
+        /// <remarks>This property is settable only for unit testing purposes.</remarks>
+        internal IExceptionLogger ExceptionLogger
+        {
+            get
+            {
+                if (_exceptionLogger == null)
+                {
+                    _exceptionLogger = ExceptionServices.GetLogger(_configuration);
+                }
+
+                return _exceptionLogger;
+            }
+            set
+            {
+                _exceptionLogger = value;
+            }
+        }
+
+        /// <remarks>This property is settable only for unit testing purposes.</remarks>
+        internal IExceptionHandler ExceptionHandler
+        {
+            get
+            {
+                if (_exceptionHandler == null)
+                {
+                    _exceptionHandler = ExceptionServices.GetHandler(_configuration);
+                }
+
+                return _exceptionHandler;
+            }
+            set
+            {
+                _exceptionHandler = value;
+            }
         }
 
         /// <summary>
@@ -117,10 +167,11 @@ namespace System.Web.Http
         /// Dispatches an incoming <see cref="HttpRequestMessage"/>.
         /// </summary>
         /// <param name="request">The request to dispatch</param>
-        /// <param name="cancellationToken">The cancellation token.</param>
+        /// <param name="cancellationToken">The token to monitor for cancellation requests.</param>
         /// <returns>A <see cref="Task{HttpResponseMessage}"/> representing the ongoing operation.</returns>
         [SuppressMessage("Microsoft.Reliability", "CA2000:Dispose objects before losing scope", Justification = "Caller becomes owner.")]
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        [SuppressMessage("Microsoft.Design", "CA1031:DoNotCatchGeneralExceptionTypes", Justification = "we are converting exceptions to error responses.")]
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             if (request == null)
             {
@@ -129,7 +180,7 @@ namespace System.Web.Http
 
             if (_disposed)
             {
-                return TaskHelpers.FromResult(request.CreateErrorResponse(HttpStatusCode.ServiceUnavailable, SRResources.HttpServerDisposed));
+                return request.CreateErrorResponse(HttpStatusCode.ServiceUnavailable, SRResources.HttpServerDisposed);
             }
 
             // The first request initializes the server
@@ -139,21 +190,71 @@ namespace System.Web.Http
             SynchronizationContext context = SynchronizationContext.Current;
             if (context != null)
             {
-                request.Properties.Add(HttpPropertyKeys.SynchronizationContextKey, context);
+                request.SetSynchronizationContext(context);
             }
 
             // Add HttpConfiguration object as a parameter to the request 
-            request.Properties.Add(HttpPropertyKeys.HttpConfigurationKey, _configuration);
+            request.SetConfiguration(_configuration);
 
             // Ensure we have a principal, even if the host didn't give us one
             IPrincipal originalPrincipal = Thread.CurrentPrincipal;
             if (originalPrincipal == null)
             {
-                Thread.CurrentPrincipal = _anonymousPrincipal.Value;
+                Thread.CurrentPrincipal = _anonymousPrincipal;
             }
 
-            return base.SendAsync(request, cancellationToken)
-                       .Finally(() => Thread.CurrentPrincipal = originalPrincipal, runSynchronously: true);
+            // Ensure we have a principal on the request context (if there is a request context).
+            HttpRequestContext requestContext = request.GetRequestContext();
+
+            if (requestContext == null)
+            {
+                requestContext = new RequestBackedHttpRequestContext(request);
+
+                // if the host did not set a request context we will also set it back to the request.
+                request.SetRequestContext(requestContext);
+            }
+
+            try
+            {
+                ExceptionDispatchInfo exceptionInfo;
+
+                try
+                {
+                    return await base.SendAsync(request, cancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    // Propogate the canceled task without calling exception loggers or handlers.
+                    throw;
+                }
+                catch (HttpResponseException exception)
+                {
+                    return exception.Response;
+                }
+                catch (Exception exception)
+                {
+                    exceptionInfo = ExceptionDispatchInfo.Capture(exception);
+                }
+
+                Debug.Assert(exceptionInfo.SourceException != null);
+
+                ExceptionContext exceptionContext = new ExceptionContext(exceptionInfo.SourceException,
+                    ExceptionCatchBlocks.HttpServer, request);
+                await ExceptionLogger.LogAsync(exceptionContext, cancellationToken);
+                HttpResponseMessage response = await ExceptionHandler.HandleAsync(exceptionContext,
+                    cancellationToken);
+
+                if (response == null)
+                {
+                    exceptionInfo.Throw();
+                }
+
+                return response;
+            }
+            finally
+            {
+                Thread.CurrentPrincipal = originalPrincipal;
+            }
         }
 
         private void EnsureInitialized()
@@ -176,10 +277,20 @@ namespace System.Web.Http
         {
             // Do final initialization of the configuration.
             // It is considered immutable from this point forward.
-            _configuration.Initializer(_configuration);
+            _configuration.EnsureInitialized();
 
             // Create pipeline
             InnerHandler = HttpClientFactory.CreatePipeline(_dispatcher, _configuration.MessageHandlers);
+        }
+
+        private static HttpConfiguration EnsureNonNull(HttpConfiguration configuration)
+        {
+            if (configuration == null)
+            {
+                throw new ArgumentNullException("configuration");
+            }
+
+            return configuration;
         }
     }
 }

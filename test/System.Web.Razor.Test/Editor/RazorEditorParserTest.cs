@@ -113,6 +113,7 @@ namespace System.Web.Razor.Test.Editor
         }
 
         [Fact]
+        [ReplaceCulture]
         public void CheckForStructureChangesStartsReparseAndFiresDocumentParseCompletedEventIfNoAdditionalChangesQueued()
         {
             // Arrange
@@ -134,11 +135,12 @@ namespace System.Web.Razor.Test.Editor
 
                 // Assert
                 MiscUtils.DoWithTimeoutIfNotDebugging(parseComplete.Wait);
+
+                string generatedCode = capturedArgs.GeneratorResults.GeneratedCode.GenerateCode<CSharpCodeProvider>();
+
                 Assert.Equal(
                     SimpleCSHTMLDocumentGenerated.ReadAllText(),
-                    MiscUtils.StripRuntimeVersion(
-                        capturedArgs.GeneratorResults.GeneratedCode.GenerateCode<CSharpCodeProvider>()
-                    ));
+                    MiscUtils.StripRuntimeVersion(generatedCode));
             }
         }
 

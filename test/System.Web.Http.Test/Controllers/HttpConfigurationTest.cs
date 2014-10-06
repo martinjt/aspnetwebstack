@@ -55,21 +55,6 @@ namespace System.Web.Http
         }
 
         [Fact]
-        public void Dispose_DisposesOfServices()
-        {
-            // Arrange
-            var configuration = new HttpConfiguration();
-            var services = new Mock<DefaultServices> { CallBase = true };
-            configuration.Services = services.Object;
-
-            // Act
-            configuration.Dispose();
-
-            // Assert
-            services.Verify(s => s.Dispose(), Times.Once());
-        }
-
-        [Fact]
         public void DependencyResolver_GuardClauses()
         {
             // Arrange
@@ -113,6 +98,23 @@ namespace System.Web.Http
 
             // Assert
             mock.Verify();
+        }
+
+        [Fact]
+        public void EnsureInitialized_CallsInitializerOnce()
+        {
+            // Arrange
+            int count = 0;
+            var config = new HttpConfiguration();
+            config.Initializer = _ => { count++; };
+
+            // Act
+            config.EnsureInitialized();
+            Assert.Equal(1, count);
+
+            config.EnsureInitialized();
+            Assert.Equal(1, count);
+
         }
 
         [Fact]

@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Web.Http.Controllers;
 using System.Web.Http.Filters;
+using System.Web.Http.Services;
 using Microsoft.TestCommon;
 using Moq;
 
@@ -117,25 +118,24 @@ namespace System.Web.Http.Tracing.Tracers
         {
             // Arrange
             Mock<ActionFilterAttribute> mockAttr = new Mock<ActionFilterAttribute>() { CallBase = true };
-            Mock<HttpActionDescriptor> mockActionDescriptor = new Mock<HttpActionDescriptor>() {CallBase = true};
+            Mock<HttpActionDescriptor> mockActionDescriptor = new Mock<HttpActionDescriptor>() { CallBase = true };
             mockActionDescriptor.Setup(a => a.ActionName).Returns("test");
             mockActionDescriptor.Setup(a => a.GetParameters()).Returns(new Collection<HttpParameterDescriptor>(new HttpParameterDescriptor[0]));
             HttpActionContext actionContext = ContextUtil.CreateActionContext(actionDescriptor: mockActionDescriptor.Object);
             TestTraceWriter traceWriter = new TestTraceWriter();
-            ActionFilterAttributeTracer tracer = new ActionFilterAttributeTracer(mockAttr.Object, traceWriter);
+            IActionFilter tracer = new ActionFilterAttributeTracer(mockAttr.Object, traceWriter) as IActionFilter;
             Func<Task<HttpResponseMessage>> continuation =
-                () => TaskHelpers.FromResult<HttpResponseMessage>(new HttpResponseMessage());
+                () => Task.FromResult<HttpResponseMessage>(new HttpResponseMessage());
             TraceRecord[] expectedTraces = new TraceRecord[]
             {
-                new TraceRecord(actionContext.Request, TraceCategories.FiltersCategory, TraceLevel.Info) { Kind = TraceKind.Begin, Operation = "ActionExecuting" },
-                new TraceRecord(actionContext.Request, TraceCategories.FiltersCategory, TraceLevel.Info) { Kind = TraceKind.End,  Operation = "ActionExecuting" },
-                new TraceRecord(actionContext.Request, TraceCategories.FiltersCategory, TraceLevel.Info) { Kind = TraceKind.Begin, Operation = "ActionExecuted" },
-                new TraceRecord(actionContext.Request, TraceCategories.FiltersCategory, TraceLevel.Info) { Kind = TraceKind.End,  Operation = "ActionExecuted" }
+                new TraceRecord(actionContext.Request, TraceCategories.FiltersCategory, TraceLevel.Info) { Kind = TraceKind.Begin, Operation = "OnActionExecutingAsync" },
+                new TraceRecord(actionContext.Request, TraceCategories.FiltersCategory, TraceLevel.Info) { Kind = TraceKind.End,  Operation = "OnActionExecutingAsync" },
+                new TraceRecord(actionContext.Request, TraceCategories.FiltersCategory, TraceLevel.Info) { Kind = TraceKind.Begin, Operation = "OnActionExecutedAsync" },
+                new TraceRecord(actionContext.Request, TraceCategories.FiltersCategory, TraceLevel.Info) { Kind = TraceKind.End,  Operation = "OnActionExecutedAsync" }
             };
 
             // Act
-            Task<HttpResponseMessage> task = ((IActionFilter) tracer).ExecuteActionFilterAsync(actionContext, CancellationToken.None, continuation);
-            task.Wait();
+            tracer.ExecuteActionFilterAsync(actionContext, CancellationToken.None, continuation).Wait();
 
             // Assert
             Assert.Equal<TraceRecord>(expectedTraces, traceWriter.Traces, new TraceRecordComparer());
@@ -153,17 +153,17 @@ namespace System.Web.Http.Tracing.Tracers
             mockActionDescriptor.Setup(a => a.GetParameters()).Returns(new Collection<HttpParameterDescriptor>(new HttpParameterDescriptor[0]));
             HttpActionContext actionContext = ContextUtil.CreateActionContext(actionDescriptor: mockActionDescriptor.Object);
             TestTraceWriter traceWriter = new TestTraceWriter();
-            ActionFilterAttributeTracer tracer = new ActionFilterAttributeTracer(mockAttr.Object, traceWriter);
+            IActionFilter tracer = new ActionFilterAttributeTracer(mockAttr.Object, traceWriter) as IActionFilter;
             Func<Task<HttpResponseMessage>> continuation =
-                () => TaskHelpers.FromResult<HttpResponseMessage>(new HttpResponseMessage());
+                () => Task.FromResult<HttpResponseMessage>(new HttpResponseMessage());
             TraceRecord[] expectedTraces = new TraceRecord[]
             {
-                new TraceRecord(actionContext.Request, TraceCategories.FiltersCategory, TraceLevel.Info) { Kind = TraceKind.Begin, Operation = "ActionExecuting" },
-                new TraceRecord(actionContext.Request, TraceCategories.FiltersCategory, TraceLevel.Error) { Kind = TraceKind.End,  Operation = "ActionExecuting" }
+                new TraceRecord(actionContext.Request, TraceCategories.FiltersCategory, TraceLevel.Info) { Kind = TraceKind.Begin, Operation = "OnActionExecutingAsync" },
+                new TraceRecord(actionContext.Request, TraceCategories.FiltersCategory, TraceLevel.Error) { Kind = TraceKind.End,  Operation = "OnActionExecutingAsync" }
             };
 
             // Act
-            Task<HttpResponseMessage> task = ((IActionFilter)tracer).ExecuteActionFilterAsync(actionContext, CancellationToken.None, continuation);
+            Task<HttpResponseMessage> task = tracer.ExecuteActionFilterAsync(actionContext, CancellationToken.None, continuation);
 
             // Assert
             Exception thrown = Assert.Throws<InvalidOperationException>(() => task.Wait());
@@ -184,25 +184,54 @@ namespace System.Web.Http.Tracing.Tracers
             mockActionDescriptor.Setup(a => a.GetParameters()).Returns(new Collection<HttpParameterDescriptor>(new HttpParameterDescriptor[0]));
             HttpActionContext actionContext = ContextUtil.CreateActionContext(actionDescriptor: mockActionDescriptor.Object);
             TestTraceWriter traceWriter = new TestTraceWriter();
-            ActionFilterAttributeTracer tracer = new ActionFilterAttributeTracer(mockAttr.Object, traceWriter);
+            IActionFilter tracer = new ActionFilterAttributeTracer(mockAttr.Object, traceWriter) as IActionFilter;
+
             Func<Task<HttpResponseMessage>> continuation =
-                () => TaskHelpers.FromResult<HttpResponseMessage>(new HttpResponseMessage());
+                () => Task.FromResult<HttpResponseMessage>(new HttpResponseMessage());
             TraceRecord[] expectedTraces = new TraceRecord[]
             {
-                new TraceRecord(actionContext.Request, TraceCategories.FiltersCategory, TraceLevel.Info) { Kind = TraceKind.Begin, Operation = "ActionExecuting" },
-                new TraceRecord(actionContext.Request, TraceCategories.FiltersCategory, TraceLevel.Info) { Kind = TraceKind.End,  Operation = "ActionExecuting" },
-                new TraceRecord(actionContext.Request, TraceCategories.FiltersCategory, TraceLevel.Info) { Kind = TraceKind.Begin, Operation = "ActionExecuted" },
-                new TraceRecord(actionContext.Request, TraceCategories.FiltersCategory, TraceLevel.Error) { Kind = TraceKind.End,  Operation = "ActionExecuted" }
+                new TraceRecord(actionContext.Request, TraceCategories.FiltersCategory, TraceLevel.Info) { Kind = TraceKind.Begin, Operation = "OnActionExecutingAsync" },
+                new TraceRecord(actionContext.Request, TraceCategories.FiltersCategory, TraceLevel.Info) { Kind = TraceKind.End,  Operation = "OnActionExecutingAsync" },
+                new TraceRecord(actionContext.Request, TraceCategories.FiltersCategory, TraceLevel.Info) { Kind = TraceKind.Begin, Operation = "OnActionExecutedAsync" },
+                new TraceRecord(actionContext.Request, TraceCategories.FiltersCategory, TraceLevel.Error) { Kind = TraceKind.End,  Operation = "OnActionExecutedAsync" }
             };
 
             // Act
-            Task<HttpResponseMessage> task = ((IActionFilter)tracer).ExecuteActionFilterAsync(actionContext, CancellationToken.None, continuation);
+            Task<HttpResponseMessage> task = tracer.ExecuteActionFilterAsync(actionContext, CancellationToken.None, continuation);
 
             // Assert
             Exception thrown = Assert.Throws<InvalidOperationException>(() => task.Wait());
             Assert.Same(exception, thrown);
             Assert.Same(exception, traceWriter.Traces[3].Exception);
             Assert.Equal<TraceRecord>(expectedTraces, traceWriter.Traces, new TraceRecordComparer());
+        }
+
+        [Fact]
+        public void Inner_Property_On_ActionFilterAttributeTracer_Returns_ActionFilterAttribute()
+        {
+            // Arrange
+            ActionFilterAttribute expectedInner = new Mock<ActionFilterAttribute>().Object;
+            ActionFilterAttributeTracer productUnderTest = new ActionFilterAttributeTracer(expectedInner, new TestTraceWriter());
+
+            // Act
+            ActionFilterAttribute actualInner = productUnderTest.Inner;
+
+            // Assert
+            Assert.Same(expectedInner, actualInner);
+        }
+
+        [Fact]
+        public void Decorator_GetInner_On_ActionFilterAttributeTracer_Returns_ActionFilterAttribute()
+        {
+            // Arrange
+            ActionFilterAttribute expectedInner = new Mock<ActionFilterAttribute>().Object;
+            ActionFilterAttributeTracer productUnderTest = new ActionFilterAttributeTracer(expectedInner, new TestTraceWriter());
+
+            // Act
+            ActionFilterAttribute actualInner = Decorator.GetInner(productUnderTest as ActionFilterAttribute);
+
+            // Assert
+            Assert.Same(expectedInner, actualInner);
         }
     }
 }

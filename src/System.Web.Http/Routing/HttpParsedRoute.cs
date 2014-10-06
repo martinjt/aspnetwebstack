@@ -12,13 +12,13 @@ namespace System.Web.Http.Routing
 {
     internal sealed class HttpParsedRoute
     {
-        private IList<PathSegment> _pathSegments;
-
-        public HttpParsedRoute(IList<PathSegment> pathSegments)
+        public HttpParsedRoute(List<PathSegment> pathSegments)
         {
             Contract.Assert(pathSegments != null);
-            _pathSegments = pathSegments;
+            PathSegments = pathSegments;
         }
+
+        public List<PathSegment> PathSegments { get; private set; }
 
         [SuppressMessage("Microsoft.Maintainability", "CA1502:AvoidExcessiveComplexity", Justification = "Not changing original algorithm")]
         [SuppressMessage("Microsoft.Maintainability", "CA1505:AvoidUnmaintainableCode", Justification = "Not changing original algorithm")]
@@ -51,7 +51,7 @@ namespace System.Web.Http.Routing
             // If the URI had ordered parameters a="1", b="2", c="3" and the new values
             // specified that b="9", then we need to invalidate everything after it. The new
             // values should then be a="1", b="9", c=<no value>.
-            ForEachParameter(_pathSegments, delegate(PathParameterSubsegment parameterSubsegment)
+            ForEachParameter(PathSegments, delegate(PathParameterSubsegment parameterSubsegment)
             {
                 // If it's a parameter subsegment, examine the current value to see if it matches the new value
                 string parameterName = parameterSubsegment.ParameterName;
@@ -111,7 +111,7 @@ namespace System.Web.Http.Routing
                 string parameterName = currentValue.Key;
                 if (!acceptedValues.ContainsKey(parameterName))
                 {
-                    PathParameterSubsegment parameterSubsegment = GetParameterSubsegment(_pathSegments, parameterName);
+                    PathParameterSubsegment parameterSubsegment = GetParameterSubsegment(PathSegments, parameterName);
                     if (parameterSubsegment == null)
                     {
                         acceptedValues.Add(parameterName, currentValue.Value);
@@ -120,7 +120,7 @@ namespace System.Web.Http.Routing
             }
 
             // Add all remaining default values from the route to the list of values we will use for URI generation
-            ForEachParameter(_pathSegments, delegate(PathParameterSubsegment parameterSubsegment)
+            ForEachParameter(PathSegments, delegate(PathParameterSubsegment parameterSubsegment)
             {
                 if (!acceptedValues.ContainsKey(parameterSubsegment.ParameterName))
                 {
@@ -137,7 +137,7 @@ namespace System.Web.Http.Routing
             });
 
             // All required parameters in this URI must have values from somewhere (i.e. the accepted values)
-            bool hasAllRequiredValues = ForEachParameter(_pathSegments, delegate(PathParameterSubsegment parameterSubsegment)
+            bool hasAllRequiredValues = ForEachParameter(PathSegments, delegate(PathParameterSubsegment parameterSubsegment)
             {
                 object defaultValue;
                 if (IsParameterRequired(parameterSubsegment, defaultValues, out defaultValue))
@@ -159,7 +159,7 @@ namespace System.Web.Http.Routing
 
             // All other default values must match if they are explicitly defined in the new values
             HttpRouteValueDictionary otherDefaultValues = new HttpRouteValueDictionary(defaultValues);
-            ForEachParameter(_pathSegments, delegate(PathParameterSubsegment parameterSubsegment)
+            ForEachParameter(PathSegments, delegate(PathParameterSubsegment parameterSubsegment)
             {
                 otherDefaultValues.Remove(parameterSubsegment.ParameterName);
                 return true;
@@ -188,9 +188,9 @@ namespace System.Web.Http.Routing
             bool pendingPartsAreAllSafe = false;
             bool blockAllUriAppends = false;
 
-            for (int i = 0; i < _pathSegments.Count; i++)
+            for (int i = 0; i < PathSegments.Count; i++)
             {
-                PathSegment pathSegment = _pathSegments[i]; // parsedRouteUriPart
+                PathSegment pathSegment = PathSegments[i]; // parsedRouteUriPart
 
                 if (pathSegment is PathSeparatorSegment)
                 {
@@ -244,8 +244,9 @@ namespace System.Web.Http.Routing
                         // segment "v1-v2.xml".
                         bool addedAnySubsegments = false;
 
-                        foreach (PathSubsegment subsegment in contentPathSegment.Subsegments)
+                        for (int j = 0; j < contentPathSegment.Subsegments.Count; j++)
                         {
+                            PathSubsegment subsegment = contentPathSegment.Subsegments[j];
                             PathLiteralSubsegment literalSubsegment = subsegment as PathLiteralSubsegment;
                             if (literalSubsegment != null)
                             {
@@ -406,7 +407,7 @@ namespace System.Web.Http.Routing
             return Uri.HexEscape(m.Value[0]);
         }
 
-        private static bool ForEachParameter(IList<PathSegment> pathSegments, Func<PathParameterSubsegment, bool> action)
+        private static bool ForEachParameter(List<PathSegment> pathSegments, Func<PathParameterSubsegment, bool> action)
         {
             for (int i = 0; i < pathSegments.Count; i++)
             {
@@ -422,8 +423,9 @@ namespace System.Web.Http.Routing
                     PathContentSegment contentPathSegment = pathSegment as PathContentSegment;
                     if (contentPathSegment != null)
                     {
-                        foreach (PathSubsegment subsegment in contentPathSegment.Subsegments)
+                        for (int j = 0; j < contentPathSegment.Subsegments.Count; j++)
                         {
+                            PathSubsegment subsegment = contentPathSegment.Subsegments[j];
                             PathLiteralSubsegment literalSubsegment = subsegment as PathLiteralSubsegment;
                             if (literalSubsegment != null)
                             {
@@ -457,7 +459,7 @@ namespace System.Web.Http.Routing
             return true;
         }
 
-        private static PathParameterSubsegment GetParameterSubsegment(IList<PathSegment> pathSegments, string parameterName)
+        private static PathParameterSubsegment GetParameterSubsegment(List<PathSegment> pathSegments, string parameterName)
         {
             PathParameterSubsegment foundParameterSubsegment = null;
 
@@ -498,9 +500,9 @@ namespace System.Web.Http.Routing
             return routePart != null;
         }
 
-        public HttpRouteValueDictionary Match(string virtualPath, HttpRouteValueDictionary defaultValues)
+        public HttpRouteValueDictionary Match(RoutingContext context, HttpRouteValueDictionary defaultValues)
         {
-            IList<string> requestPathSegments = HttpRouteParser.SplitUriToPathSegmentStrings(virtualPath);
+            List<string> requestPathSegments = context.PathSegments;
 
             if (defaultValues == null)
             {
@@ -520,9 +522,9 @@ namespace System.Web.Http.Routing
             // parameter value.
             bool usedCatchAllParameter = false;
 
-            for (int i = 0; i < _pathSegments.Count; i++)
+            for (int i = 0; i < PathSegments.Count; i++)
             {
-                PathSegment pathSegment = _pathSegments[i];
+                PathSegment pathSegment = PathSegments[i];
 
                 if (requestPathSegments.Count <= i)
                 {
@@ -552,7 +554,7 @@ namespace System.Web.Http.Routing
                     {
                         if (contentPathSegment.IsCatchAll)
                         {
-                            Contract.Assert(i == (_pathSegments.Count - 1), "If we're processing a catch-all, we should be on the last route segment.");
+                            Contract.Assert(i == (PathSegments.Count - 1), "If we're processing a catch-all, we should be on the last route segment.");
                             MatchCatchAll(contentPathSegment, requestPathSegments.Skip(i), defaultValues, matchedValues);
                             usedCatchAllParameter = true;
                         }
@@ -573,13 +575,13 @@ namespace System.Web.Http.Routing
 
             if (!usedCatchAllParameter)
             {
-                if (_pathSegments.Count < requestPathSegments.Count)
+                if (PathSegments.Count < requestPathSegments.Count)
                 {
                     // If we've already gone through all the parts defined in the route but the URI
                     // still contains more content, check that the remaining content is all separators.
-                    for (int i = _pathSegments.Count; i < requestPathSegments.Count; i++)
+                    for (int i = PathSegments.Count; i < requestPathSegments.Count; i++)
                     {
-                        if (!HttpRouteParser.IsSeparator(requestPathSegments[i]))
+                        if (!RouteParser.IsSeparator(requestPathSegments[i]))
                         {
                             return null;
                         }
@@ -652,6 +654,12 @@ namespace System.Web.Http.Routing
                     // If there's no default value, this segment doesn't match
                     return false;
                 }
+            }
+
+            // Optimize for the common case where there is only one subsegment in the segment - either a parameter or a literal
+            if (routeSegment.Subsegments.Count == 1)
+            {
+                return MatchSingleContentPathSegment(routeSegment.Subsegments[0], requestPathSegment, matchedValues);
             }
 
             // Find last literal segment and get its last index in the string
@@ -782,6 +790,24 @@ namespace System.Web.Http.Routing
             // request URI in order for it to be a match.
             // This check is related to the check we do earlier in this function for LiteralSubsegments.
             return (lastIndex == 0) || (routeSegment.Subsegments[0] is PathParameterSubsegment);
+        }
+
+        private static bool MatchSingleContentPathSegment(PathSubsegment pathSubsegment, string requestPathSegment, HttpRouteValueDictionary matchedValues)
+        {
+            PathParameterSubsegment parameterSubsegment = pathSubsegment as PathParameterSubsegment;
+            if (parameterSubsegment == null)
+            {
+                // Handle a single literal segment
+                PathLiteralSubsegment literalSubsegment = pathSubsegment as PathLiteralSubsegment;
+                Contract.Assert(literalSubsegment != null, "Invalid path segment type");
+                return literalSubsegment.Literal.Equals(requestPathSegment, StringComparison.OrdinalIgnoreCase);
+            }
+            else
+            {
+                // Handle a single parameter segment
+                matchedValues.Add(parameterSubsegment.ParameterName, requestPathSegment);
+                return true;
+            }
         }
 
         private static bool RoutePartsEqual(object a, object b)

@@ -1,5 +1,28 @@
 ﻿// Copyright (c) Microsoft Open Technologies, Inc. All rights reserved. See License.txt in the project root for license information.
 
+// Portions copyright (c) 2007 James Newton-King
+//
+// Permission is hereby granted, free of charge, to any person
+// obtaining a copy of this software and associated documentation
+// files (the "Software"), to deal in the Software without
+// restriction, including without limitation the rights to use,
+// copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the
+// Software is furnished to do so, subject to the following
+// conditions:
+//
+// The above copyright notice and this permission notice shall be
+// included in all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+// EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
+// OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+// NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+// HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+// WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+// OTHER DEALINGS IN THE SOFTWARE.
+
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
@@ -34,7 +57,10 @@ namespace System.Net.Http.Formatting
                     { ConsoleColor.DarkCyan, "3" },
                     { new DateTimeOffset(1999, 5, 27, 4, 34, 45, TimeSpan.Zero), "\"1999-05-27T04:34:45+00:00\"" },
                     { new TimeSpan(5, 30, 0), "\"05:30:00\"" },
-                    { new Uri("http://www.bing.com"), @"""http://www.bing.com/""" },
+                    { new Uri("http://www.bing.com"), @"""http://www.bing.com""" },
+                    { new Uri("http://www.bing.com/"), @"""http://www.bing.com/""" },
+                    { new Uri("http://www.bing.com/foo"), @"""http://www.bing.com/foo""" },
+                    { new Uri("http://www.bing.com/foo/"), @"""http://www.bing.com/foo/""" },
                     { new Guid("4ed1cd44-11d7-4b27-b623-0b8b553c8906"), "\"4ed1cd44-11d7-4b27-b623-0b8b553c8906\"" },
 
                     // Structs
@@ -65,14 +91,18 @@ namespace System.Net.Http.Formatting
                     // Classes
                     { new DataContractType() { s = "foo", i = 49, NotAMember = "Error" }, "{\"s\":\"foo\",\"i\":49}" },
                     { new POCOType() { s = "foo", t = "Error"}, "{\"s\":\"foo\"}" },
+#if !NETFX_CORE // Only publics are serialized in portable library
                     { new SerializableType("protected") { publicField = "public", protectedInternalField = "protected internal", internalField = "internal", PublicProperty = "private", nonSerializedField = "Error" }, "{\"publicField\":\"public\",\"internalField\":\"internal\",\"protectedInternalField\":\"protected internal\",\"protectedField\":\"protected\",\"privateField\":\"private\"}" },
+#else
+                    { new SerializableType("protected") { publicField = "public", protectedInternalField = "protected internal", internalField = "internal", PublicProperty = "private", nonSerializedField = "Error" }, "{\"publicField\":\"public\",\"PublicProperty\":\"private\"}" },
+#endif
                     { new { field1 = "x", field2 = (string)null, field3 = "y" }, "{\"field1\":\"x\",\"field2\":null,\"field3\":\"y\"}" },
                     
                     // Generics
                     { new KeyValuePair<string, bool>("foo", false), "{\"Key\":\"foo\",\"Value\":false}" },
 
                     // ISerializable types
-                    { new ArgumentNullException("param"), "{\"ClassName\":\"System.ArgumentNullException\",\"Message\":\"Value cannot be null.\",\"Data\":null,\"InnerException\":null,\"HelpURL\":null,\"StackTraceString\":null,\"RemoteStackTraceString\":null,\"RemoteStackIndex\":0,\"ExceptionMethod\":null,\"HResult\":-2147467261,\"Source\":null,\"WatsonBuckets\":null,\"ParamName\":\"param\"}" },
+                    { new ISerializableType() { Property = "Value" }, "{\"SomeProperty\":\"Value\"}" },
 
                     // JSON Values
                     { new JValue(false), "false" },
@@ -93,7 +123,7 @@ namespace System.Net.Http.Formatting
                 {
                     // Null
                     { null, "null", typeof(POCOType) },
-                    { null, "null", typeof(JToken) },
+                    { JValue.CreateNull(), "null", typeof(JToken) },
 
                     // Nullables
                     { new int?(), "null", typeof(int?) },
@@ -137,7 +167,8 @@ namespace System.Net.Http.Formatting
             }
             else
             {
-                Assert.Equal(expectedObject, Deserialize(json, type), new ObjectComparer());
+                object o = Deserialize(json, type);
+                Assert.Equal(expectedObject, o, new ObjectComparer());
             }
         }
 
@@ -288,6 +319,11 @@ namespace System.Net.Http.Formatting
                 if (xType == typeof(SerializableType))
                 {
                     return Equals<SerializableType>(x, y);
+                }
+
+                if (xType == typeof(ISerializableType))
+                {
+                    return Equals<ISerializableType>(x, y);
                 }
 
                 if (xType == typeof(Point))
@@ -454,11 +490,17 @@ namespace System.Net.Http.Formatting
 
         public bool Equals(SerializableType other)
         {
+#if !NETFX_CORE // Only publics are serialized in portable library. privateField is serialized through PublicProperty
             return this.publicField == other.publicField &&
                 this.internalField == other.internalField &&
                 this.protectedInternalField == other.protectedInternalField &&
                 this.protectedField == other.protectedField &&
                 this.privateField == other.privateField;
+#else 
+            // this.privateField is serialized through this.PublicProperty, thus the comparison here
+            return this.publicField == other.publicField &&
+                this.privateField == other.privateField;
+#endif
         }
     }
 
@@ -520,5 +562,37 @@ namespace System.Net.Http.Formatting
 
     public class DangerousType
     {
+    }
+
+    [Serializable]
+    public class ISerializableType : ISerializable, IEquatable<ISerializableType>
+    {
+        public ISerializableType()
+        {
+        }
+
+        protected ISerializableType(SerializationInfo info, StreamingContext context)
+        {
+            // The key here for GetValue/SetValue is intentionally different from the property name.
+            // This tests that the serializer is using the result of GetObjectData, rather than the property
+            // name.
+            Property = (string)info.GetValue("SomeProperty", typeof(String));
+        }
+
+        public string Property
+        {
+            get;
+            set;
+        }
+
+        public void GetObjectData(SerializationInfo info, StreamingContext context)
+        {
+            info.AddValue("SomeProperty", this.Property, typeof(String));
+        }
+
+        public bool Equals(ISerializableType other)
+        {
+            return String.Equals(Property, other.Property, StringComparison.Ordinal);
+        }
     }
 }

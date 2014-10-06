@@ -51,10 +51,7 @@ namespace System.Web.Mvc
 
         private MethodInfo[] GetAllActionMethodsFromSelector()
         {
-            List<MethodInfo> allValidMethods = new List<MethodInfo>();
-            allValidMethods.AddRange(_selector.AliasedMethods);
-            allValidMethods.AddRange(_selector.NonAliasedMethods.SelectMany(g => g));
-            return allValidMethods.ToArray();
+            return _selector.StandardRouteMethods.ToArray();
         }
 
         public override ActionDescriptor[] GetCanonicalActions()
@@ -92,10 +89,11 @@ namespace System.Web.Mvc
 
         private ActionDescriptor[] LazilyFetchCanonicalActionsCollection()
         {
-            return DescriptorUtil.LazilyFetchOrCreateDescriptors<MethodInfo, ActionDescriptor>(
-                ref _canonicalActionsCache /* cacheLocation */,
-                GetAllActionMethodsFromSelector /* initializer */,
-                methodInfo => ReflectedActionDescriptor.TryCreateDescriptor(methodInfo, methodInfo.Name, this) /* converter */);
+            return DescriptorUtil.LazilyFetchOrCreateDescriptors(
+                cacheLocation: ref _canonicalActionsCache,
+                initializer: (ReflectedControllerDescriptor state) => state.GetAllActionMethodsFromSelector(),
+                converter: (MethodInfo methodInfo, ReflectedControllerDescriptor state) => ReflectedActionDescriptor.TryCreateDescriptor(methodInfo, methodInfo.Name, state),
+                state: this);
         }
     }
 }

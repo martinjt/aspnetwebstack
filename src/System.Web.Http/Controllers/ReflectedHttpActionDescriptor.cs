@@ -26,6 +26,7 @@ namespace System.Web.Http.Controllers
         private static readonly object[] _empty = new object[0];
 
         private readonly Lazy<Collection<HttpParameterDescriptor>> _parameters;
+        private ParameterInfo[] _parameterInfos;
 
         private Lazy<ActionExecutor> _actionExecutor;
         private MethodInfo _methodInfo;
@@ -38,7 +39,8 @@ namespace System.Web.Http.Controllers
         // Furthermore, many different services may call to ask for different attributes, so we have multiple callers. 
         // That means there's not a single cache for the callers, which means there's some value caching here.
         // This cache can be a 2x speedup in some benchmarks.
-        private object[] _attrCached;
+        private object[] _attributeCache;
+        private object[] _declaredOnlyAttributeCache;
 
         private static readonly HttpMethod[] _supportedHttpMethodsByConvention = 
         { 
@@ -73,11 +75,6 @@ namespace System.Web.Http.Controllers
             _parameters = new Lazy<Collection<HttpParameterDescriptor>>(() => InitializeParameterDescriptors());
         }
 
-        /// <summary>
-        /// Caches that the ActionSelector use.
-        /// </summary>
-        internal IActionMethodSelector[] CacheAttrsIActionMethodSelector { get; private set; }
-
         public override string ActionName
         {
             get { return _actionName; }
@@ -102,20 +99,33 @@ namespace System.Web.Http.Controllers
             }
         }
 
+        private ParameterInfo[] ParameterInfos
+        {
+            get
+            {
+                if (_parameterInfos == null)
+                {
+                    _parameterInfos = _methodInfo.GetParameters();
+                }
+                return _parameterInfos;
+            }
+        }
+
         /// <inheritdoc/>
         public override Type ReturnType
         {
             get { return _returnType; }
         }
 
-        public override Collection<T> GetCustomAttributes<T>()
+        /// <inheritdoc/>
+        public override Collection<T> GetCustomAttributes<T>(bool inherit)
         {
-            Contract.Assert(_methodInfo != null); // can't get attributes without the method set!
-            Contract.Assert(_attrCached != null); // setting the method should build the attribute cache
-            return new Collection<T>(TypeHelper.OfType<T>(_attrCached));
+            object[] attributes = inherit ? _attributeCache : _declaredOnlyAttributeCache;
+            return new Collection<T>(TypeHelper.OfType<T>(attributes));
         }
 
         /// <inheritdoc/>
+        [SuppressMessage("Microsoft.Design", "CA1031:DoNotCatchGeneralExceptionTypes", Justification = "The caught exception type is reflected into a faulted task.")]
         public override Task<object> ExecuteAsync(HttpControllerContext controllerContext, IDictionary<string, object> arguments, CancellationToken cancellationToken)
         {
             if (controllerContext == null)
@@ -128,11 +138,20 @@ namespace System.Web.Http.Controllers
                 throw Error.ArgumentNull("arguments");
             }
 
-            return TaskHelpers.RunSynchronously(() =>
+            if (cancellationToken.IsCancellationRequested)
+            {
+                return TaskHelpers.Canceled<object>();
+            }
+
+            try
             {
                 object[] argumentValues = PrepareParameters(arguments, controllerContext);
                 return _actionExecutor.Value.Execute(controllerContext.Controller, argumentValues);
-            }, cancellationToken);
+            }
+            catch (Exception e)
+            {
+                return TaskHelpers.FromError<object>(e);
+            }
         }
 
         public override Collection<IFilter> GetFilters()
@@ -148,12 +167,13 @@ namespace System.Web.Http.Controllers
         private void InitializeProperties(MethodInfo methodInfo)
         {
             _methodInfo = methodInfo;
+            _parameterInfos = null;
             _returnType = GetReturnType(methodInfo);
             _actionExecutor = new Lazy<ActionExecutor>(() => InitializeActionExecutor(_methodInfo));
-            _attrCached = _methodInfo.GetCustomAttributes(inherit: true);
-            CacheAttrsIActionMethodSelector = _attrCached.OfType<IActionMethodSelector>().ToArray();
-            _actionName = GetActionName(_methodInfo, _attrCached);
-            _supportedHttpMethods = GetSupportedHttpMethods(_methodInfo, _attrCached);
+            _declaredOnlyAttributeCache = _methodInfo.GetCustomAttributes(inherit: false);
+            _attributeCache = _methodInfo.GetCustomAttributes(inherit: true);
+            _actionName = GetActionName(_methodInfo, _attributeCache);
+            _supportedHttpMethods = GetSupportedHttpMethods(_methodInfo, _attributeCache);
         }
 
         internal static Type GetReturnType(MethodInfo methodInfo)
@@ -174,7 +194,7 @@ namespace System.Web.Http.Controllers
         {
             Contract.Assert(_methodInfo != null);
 
-            List<HttpParameterDescriptor> parameterInfos = _methodInfo.GetParameters().Select(
+            List<HttpParameterDescriptor> parameterInfos = ParameterInfos.Select(
                 (item) => new ReflectedHttpParameterDescriptor(this, item)).ToList<HttpParameterDescriptor>();
             return new Collection<HttpParameterDescriptor>(parameterInfos);
         }
@@ -187,7 +207,7 @@ namespace System.Web.Http.Controllers
                 return _empty;
             }
 
-            ParameterInfo[] parameterInfos = MethodInfo.GetParameters();
+            ParameterInfo[] parameterInfos = ParameterInfos;
             int parameterCount = parameterInfos.Length;
             object[] parameterValues = new object[parameterCount];
             for (int parameterIndex = 0; parameterIndex < parameterCount; parameterIndex++)
@@ -278,6 +298,40 @@ namespace System.Web.Http.Controllers
             }
 
             return supportedHttpMethods;
+        }
+
+        // Implementing Equals and GetHashCode is needed here because when tracing is enabled, a different set of action descriptors
+        // are available at configuration time for attribute routing and at runtime. This is because the default action selector
+        // clears its action descriptor cache when the controller descriptor is different. And since tracing wraps the controller
+        // descriptor for tracing, the cache gets cleared and new action descriptors get created for tracing. We need to compare
+        // the action descriptors by method info to be able to correlate attribute routing actions to the tracing action descriptors.
+
+        /// <inheritdoc />
+        public override int GetHashCode()
+        {
+            if (_methodInfo != null)
+            {
+                return _methodInfo.GetHashCode();
+            }
+
+            return base.GetHashCode();
+        }
+
+        /// <inheritdoc />
+        public override bool Equals(object obj)
+        {
+            if (_methodInfo != null)
+            {
+                ReflectedHttpActionDescriptor otherDescriptor = obj as ReflectedHttpActionDescriptor;
+                if (otherDescriptor == null)
+                {
+                    return false;
+                }
+
+                return _methodInfo.Equals(otherDescriptor._methodInfo);
+            }
+
+            return base.Equals(obj);
         }
 
         private static ActionExecutor InitializeActionExecutor(MethodInfo methodInfo)
@@ -404,7 +458,7 @@ namespace System.Web.Http.Controllers
                                 throw Error.InvalidOperation(SRResources.ActionExecutor_UnexpectedTaskInstance,
                                     methodInfo.Name, methodInfo.DeclaringType.Name);
                             }
-                            return TaskHelpers.FromResult(result);
+                            return Task.FromResult(result);
                         };
                     }
                 }

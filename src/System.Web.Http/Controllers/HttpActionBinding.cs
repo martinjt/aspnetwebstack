@@ -82,13 +82,14 @@ namespace System.Web.Http.Controllers
             }
 
             // First, make sure the actionBinding is valid before trying to execute it. This keeps us in a known state in case of errors.
-            foreach (HttpParameterBinding parameterBinder in ParameterBindings)
+            for (int i = 0; i < ParameterBindings.Length; i++)
             {
+                HttpParameterBinding parameterBinder = ParameterBindings[i];
                 if (!parameterBinder.IsValid)
                 {
                     // Throwing an exception because the webService developer's action signature is bad.
                     // This exception will be caught and converted into a 500 by the dispatcher
-                    return TaskHelpers.FromError(new InvalidOperationException(parameterBinder.ErrorMessage));
+                    throw new InvalidOperationException(parameterBinder.ErrorMessage);
                 }
             }
 
@@ -98,9 +99,18 @@ namespace System.Web.Http.Controllers
                 _metadataProvider = config.Services.GetModelMetadataProvider();
             }
 
+            return ExecuteBindingAsyncCore(actionContext, cancellationToken);
+        }
+
+        private async Task ExecuteBindingAsyncCore(HttpActionContext actionContext, CancellationToken cancellationToken)
+        {
             // Execute all the binders.
-            IEnumerable<Task> tasks = from parameterBinder in ParameterBindings select parameterBinder.ExecuteBindingAsync(_metadataProvider, actionContext, cancellationToken);
-            return TaskHelpers.Iterate(tasks, cancellationToken, disposeEnumerator: false);
+            for (int index = 0; index < ParameterBindings.Length; index++)
+            {
+                HttpParameterBinding parameterBinder = ParameterBindings[index];
+
+                await parameterBinder.ExecuteBindingAsync(_metadataProvider, actionContext, cancellationToken);
+            }
         }
     }
 }

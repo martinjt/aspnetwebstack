@@ -9,28 +9,36 @@ namespace System.Web.Mvc
     public class FilterProviderCollection : Collection<IFilterProvider>
     {
         private static FilterComparer _filterComparer = new FilterComparer();
-        private IResolver<IEnumerable<IFilterProvider>> _serviceResolver;
+        private IFilterProvider[] _combinedItems;
+        private IDependencyResolver _dependencyResolver;
 
         public FilterProviderCollection()
         {
-            _serviceResolver = new MultiServiceResolver<IFilterProvider>(() => Items);
         }
 
         public FilterProviderCollection(IList<IFilterProvider> providers)
             : base(providers)
         {
-            _serviceResolver = new MultiServiceResolver<IFilterProvider>(() => Items);
         }
 
-        internal FilterProviderCollection(IResolver<IEnumerable<IFilterProvider>> serviceResolver, params IFilterProvider[] providers)
-            : base(providers)
+        internal FilterProviderCollection(IList<IFilterProvider> list, IDependencyResolver dependencyResolver)
+            : base(list)
         {
-            _serviceResolver = serviceResolver ?? new MultiServiceResolver<IFilterProvider>(() => Items);
+            _dependencyResolver = dependencyResolver;
         }
 
-        private IEnumerable<IFilterProvider> CombinedItems
+        internal IFilterProvider[] CombinedItems
         {
-            get { return _serviceResolver.Current; }
+            get
+            {
+                IFilterProvider[] combinedItems = _combinedItems;
+                if (combinedItems == null)
+                {
+                    combinedItems = MultiServiceResolver.GetCombined<IFilterProvider>(Items, _dependencyResolver);
+                    _combinedItems = combinedItems;
+                }
+                return combinedItems;
+            }
         }
 
         private static bool AllowMultiple(object filterInstance)
@@ -55,29 +63,70 @@ namespace System.Web.Mvc
                 throw new ArgumentNullException("actionDescriptor");
             }
 
-            IEnumerable<Filter> combinedFilters =
-                CombinedItems.SelectMany(fp => fp.GetFilters(controllerContext, actionDescriptor))
-                    .OrderBy(filter => filter, _filterComparer);
+            IFilterProvider[] providers = CombinedItems;
+            List<Filter> filters = new List<Filter>();
+            for (int i = 0; i < providers.Length; i++)
+            {
+                IFilterProvider provider = providers[i];
+                foreach (Filter filter in provider.GetFilters(controllerContext, actionDescriptor))
+                {
+                    filters.Add(filter);
+                }
+            }
 
-            // Remove duplicates from the back forward
-            return RemoveDuplicates(combinedFilters.Reverse()).Reverse();
+            filters.Sort(_filterComparer);
+
+            if (filters.Count > 1)
+            {
+                RemoveDuplicates(filters);
+            }
+            return filters;
         }
 
-        private IEnumerable<Filter> RemoveDuplicates(IEnumerable<Filter> filters)
+        private static void RemoveDuplicates(List<Filter> filters)
         {
             HashSet<Type> visitedTypes = new HashSet<Type>();
 
-            foreach (Filter filter in filters)
+            // Remove duplicates from the back forward
+            for (int i = filters.Count - 1; i >= 0; i--)
             {
+                Filter filter = filters[i];
                 object filterInstance = filter.Instance;
                 Type filterInstanceType = filterInstance.GetType();
 
                 if (!visitedTypes.Contains(filterInstanceType) || AllowMultiple(filterInstance))
                 {
-                    yield return filter;
                     visitedTypes.Add(filterInstanceType);
                 }
+                else
+                {
+                    filters.RemoveAt(i);                        
+                }
             }
+        }
+
+        protected override void ClearItems()
+        {
+            _combinedItems = null;
+            base.ClearItems();
+        }
+
+        protected override void InsertItem(int index, IFilterProvider item)
+        {
+            _combinedItems = null;
+            base.InsertItem(index, item);
+        }
+
+        protected override void RemoveItem(int index)
+        {
+            _combinedItems = null;
+            base.RemoveItem(index);
+        }
+
+        protected override void SetItem(int index, IFilterProvider item)
+        {
+            _combinedItems = null;
+            base.SetItem(index, item);
         }
 
         private class FilterComparer : IComparer<Filter>

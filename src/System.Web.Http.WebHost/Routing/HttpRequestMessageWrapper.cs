@@ -1,5 +1,6 @@
 ﻿// Copyright (c) Microsoft Open Technologies, Inc. All rights reserved. See License.txt in the project root for license information.
 
+using System.Collections.Generic;
 using System.Collections.Specialized;
 using System.Net.Http;
 using System.Web.Http.Hosting;
@@ -36,7 +37,7 @@ namespace System.Web.Http.WebHost.Routing
         {
             get
             {
-                string absolutePath = _httpRequest.RequestUri.AbsolutePath;
+                string absolutePath = Path;
                 if (absolutePath.StartsWith(_virtualPathRoot, StringComparison.OrdinalIgnoreCase))
                 {
                     string relativePath = _virtualPathRoot.Length == 1 ? absolutePath : absolutePath.Substring(_virtualPathRoot.Length);
@@ -55,7 +56,7 @@ namespace System.Web.Http.WebHost.Routing
         {
             get
             {
-                string absolutePath = _httpRequest.RequestUri.AbsolutePath;
+                string absolutePath = Path;
                 if (absolutePath.StartsWith(_virtualPathRoot, StringComparison.OrdinalIgnoreCase))
                 {
                     return absolutePath.TrimEnd('/');
@@ -71,22 +72,16 @@ namespace System.Web.Http.WebHost.Routing
 
         public override bool IsLocal
         {
-            get
-            {
-                Lazy<bool> isLocal;
-                if (_httpRequest.Properties.TryGetValue<Lazy<bool>>(HttpPropertyKeys.IsLocalKey, out isLocal))
-                {
-                    return isLocal.Value;
-                }
-                return false;
-            }
+            get { return _httpRequest.IsLocal(); }
         }
 
         public override string Path
         {
             get
             {
-                return _httpRequest.RequestUri.AbsolutePath;
+                // All of the HttpContextBase methods are supposed to return paths that are unescaped
+                // and begin with '/'. Don't use Uri.AbsolutePath here because it's escaped.
+                return "/" + _httpRequest.RequestUri.GetComponents(UriComponents.Path, UriFormat.Unescaped);
             }
         }
 
@@ -102,7 +97,12 @@ namespace System.Web.Http.WebHost.Routing
 
         public override string RawUrl
         {
-            get { return _httpRequest.RequestUri.PathAndQuery; }
+            get 
+            {
+                // All of the HttpContextBase methods are supposed to return paths that are unescaped
+                // and begin with '/'. Don't use Uri.PathAndQuery here because it's escaped.
+                return _httpRequest.RequestUri.GetComponents(UriComponents.PathAndQuery, UriFormat.Unescaped); 
+            }
         }
 
         public override string RequestType

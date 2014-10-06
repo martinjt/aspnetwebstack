@@ -1,12 +1,6 @@
 ﻿// Copyright (c) Microsoft Open Technologies, Inc. All rights reserved. See License.txt in the project root for license information.
 
 using System.Collections.Generic;
-using System.ComponentModel.DataAnnotations;
-using System.Linq;
-using System.Reflection;
-using System.Security;
-using System.Web.Http.Internal;
-using System.Web.Http.Properties;
 
 namespace System.Web.Http.Metadata.Providers
 {
@@ -23,8 +17,6 @@ namespace System.Web.Http.Metadata.Providers
         {
         }
 
-        // [SecuritySafeCritical] because it uses DataAnnotations type
-        [SecuritySafeCritical]
         protected override bool ComputeConvertEmptyStringToNull()
         {
             return PrototypeCache.DisplayFormat != null
@@ -32,8 +24,6 @@ namespace System.Web.Http.Metadata.Providers
                        : base.ComputeConvertEmptyStringToNull();
         }
 
-        // [SecuritySafeCritical] because it uses DataAnnotations type
-        [SecuritySafeCritical]
         protected override string ComputeDescription()
         {
             return PrototypeCache.Display != null
@@ -41,8 +31,6 @@ namespace System.Web.Http.Metadata.Providers
                        : base.ComputeDescription();
         }
 
-        // [SecuritySafeCritical] because it uses DataAnnotations type EditableAttribute
-        [SecuritySafeCritical]
         protected override bool ComputeIsReadOnly()
         {
             if (PrototypeCache.Editable != null)
@@ -56,6 +44,39 @@ namespace System.Web.Http.Metadata.Providers
             }
 
             return base.ComputeIsReadOnly();
+        }
+
+        public override string GetDisplayName()
+        {
+            // DisplayName could be provided by either the DisplayAttribute, or DisplayNameAttribute. If neither of
+            // those supply a name, then we fall back to the property name (in base.GetDisplayName()).
+            // 
+            // DisplayName has lower precedence than Display.Name, for consistency with MVC.
+
+            // DisplayAttribute doesn't require you to set a name, so this could be null. 
+            if (PrototypeCache.Display != null)
+            {
+                string name = PrototypeCache.Display.GetName();
+                if (name != null)
+                {
+                    return name;
+                }
+            }
+
+            // It's also possible for DisplayNameAttribute to be used without setting a name. If a user does that, then DisplayName will
+            // return the empty string - but for consistency with MVC we allow it. We do fallback to the property name in the (unlikely)
+            // scenario that the user sets null as the DisplayName, again, for consistency with MVC.
+            if (PrototypeCache.DisplayName != null)
+            {
+                string name = PrototypeCache.DisplayName.DisplayName;
+                if (name != null)
+                {
+                    return name;
+                }
+            }
+
+            // If neither attribute specifies a name, we'll fall back to the property name.
+            return base.GetDisplayName();
         }
     }
 }

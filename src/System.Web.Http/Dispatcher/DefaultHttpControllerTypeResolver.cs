@@ -15,6 +15,7 @@ namespace System.Web.Http.Dispatcher
     public class DefaultHttpControllerTypeResolver : IHttpControllerTypeResolver
     {
         private readonly Predicate<Type> _isControllerTypePredicate;
+        private Func<Assembly, Type[]> _getTypesFunc = GetTypes;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="DefaultHttpControllerTypeResolver"/> with a default
@@ -39,7 +40,7 @@ namespace System.Web.Http.Dispatcher
             _isControllerTypePredicate = predicate;
         }
 
-        protected Predicate<Type> IsControllerTypePredicate
+        protected internal virtual Predicate<Type> IsControllerTypePredicate
         {
             get { return _isControllerTypePredicate; }
         }
@@ -77,13 +78,13 @@ namespace System.Web.Http.Dispatcher
                 Type[] exportedTypes = null;
                 if (assembly == null || assembly.IsDynamic)
                 {
-                    // can't call GetExportedTypes on a dynamic assembly
+                    // can't call GetTypes on a null (or dynamic?) assembly
                     continue;
                 }
 
                 try
                 {
-                    exportedTypes = assembly.GetExportedTypes();
+                    exportedTypes = _getTypesFunc(assembly);
                 }
                 catch (ReflectionTypeLoadException ex)
                 {
@@ -100,11 +101,22 @@ namespace System.Web.Http.Dispatcher
 
                 if (exportedTypes != null)
                 {
-                    result.AddRange(exportedTypes.Where(x => IsControllerTypePredicate(x)));
+                    result.AddRange(exportedTypes.Where(x => TypeIsVisible(x) && IsControllerTypePredicate(x)));
                 }
             }
 
             return result;
+        }
+
+        /// <summary>
+        /// Returns an array of <see cref="Type"/>s in the given <paramref name="assembly"/>.
+        /// </summary>
+        /// <remarks>Available separately only to allow a tracing override.</remarks>
+        /// <param name="assembly">The <see cref="Assembly"/> to check.</param>
+        /// <returns>Array of <see cref="Type"/>s types in the assembly.</returns>
+        internal static Type[] GetTypes(Assembly assembly)
+        {
+            return assembly.GetTypes();
         }
 
         /// <summary>
@@ -117,6 +129,16 @@ namespace System.Web.Http.Dispatcher
             Contract.Assert(controllerType != null);
             string controllerSuffix = DefaultHttpControllerSelector.ControllerSuffix;
             return controllerType.Name.Length > controllerSuffix.Length && controllerType.Name.EndsWith(controllerSuffix, StringComparison.OrdinalIgnoreCase);
+        }
+
+        internal void SetGetTypesFunc(Func<Assembly, Type[]> getTypesFunc)
+        {
+            _getTypesFunc = getTypesFunc;
+        }
+
+        private static bool TypeIsVisible(Type type)
+        {
+            return (type != null && type.IsVisible);
         }
     }
 }

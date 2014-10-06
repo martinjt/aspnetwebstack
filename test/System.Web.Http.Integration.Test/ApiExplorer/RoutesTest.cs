@@ -1,9 +1,11 @@
 ﻿// Copyright (c) Microsoft Open Technologies, Inc. All rights reserved. See License.txt in the project root for license information.
 
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Net.Http;
 using System.Web.Http.Description;
 using System.Web.Http.Dispatcher;
+using System.Web.Http.Routing;
 using Microsoft.TestCommon;
 
 namespace System.Web.Http.ApiExplorer
@@ -210,6 +212,79 @@ namespace System.Web.Http.ApiExplorer
 
             IApiExplorer explorer = config.Services.GetApiExplorer();
             Assert.Empty(explorer.ApiDescriptions);
+        }
+
+        [Fact]
+        public void VerifyOnlyOneSetOfDescriptionIsGenerated_OnTwoMatchingRoutes()
+        {
+            Type controllerType = typeof(ItemController);
+            HttpConfiguration config = new HttpConfiguration();
+            IHttpRoute matchingRoute = config.Routes.MapHttpRoute("Item", "Item/{id}", new { id = RouteParameter.Optional, controller = "Item" });
+            config.Routes.MapHttpRoute("Default", "{controller}/{id}", new { id = RouteParameter.Optional });
+            DefaultHttpControllerSelector controllerSelector = ApiExplorerHelper.GetStrictControllerSelector(config, controllerType);
+            config.Services.Replace(typeof(IHttpControllerSelector), controllerSelector);
+
+            IApiExplorer explorer = config.Services.GetApiExplorer();
+            Collection<ApiDescription> descriptions = explorer.ApiDescriptions;
+
+            foreach (ApiDescription description in descriptions)
+            {
+                Assert.Same(matchingRoute, description.Route);
+            }
+            List<object> expectedResults = new List<object>
+            {
+                new { HttpMethod = HttpMethod.Get, RelativePath = "Item?name={name}&series={series}", HasRequestFormatters = false, HasResponseFormatters = true, NumberOfParameters = 2},
+                new { HttpMethod = HttpMethod.Post, RelativePath = "Item", HasRequestFormatters = true, HasResponseFormatters = true, NumberOfParameters = 1},
+                new { HttpMethod = HttpMethod.Put, RelativePath = "Item", HasRequestFormatters = true, HasResponseFormatters = true, NumberOfParameters = 1},
+                new { HttpMethod = HttpMethod.Delete, RelativePath = "Item/{id}", HasRequestFormatters = false, HasResponseFormatters = false, NumberOfParameters = 1}
+            };
+            ApiExplorerHelper.VerifyApiDescriptions(descriptions, expectedResults);
+        }
+
+        [Fact]
+        public void VerifyDescriptionIsNotGeneratedForAmbiguousAction_OnDefaultRoutes()
+        {
+            Type controllerType = typeof(AmbiguousActionController);
+            HttpConfiguration config = new HttpConfiguration();
+            config.Routes.MapHttpRoute("Default", "{controller}/{id}", new { id = RouteParameter.Optional });
+            DefaultHttpControllerSelector controllerSelector = ApiExplorerHelper.GetStrictControllerSelector(config, controllerType);
+            config.Services.Replace(typeof(IHttpControllerSelector), controllerSelector);
+
+            IApiExplorer explorer = config.Services.GetApiExplorer();
+            Collection<ApiDescription> descriptions = explorer.ApiDescriptions;
+
+            List<object> expectedResults = new List<object>
+            {
+                new { HttpMethod = HttpMethod.Post, RelativePath = "AmbiguousAction/{id}", HasRequestFormatters = false, HasResponseFormatters = true, NumberOfParameters = 1}
+            };
+            ApiExplorerHelper.VerifyApiDescriptions(descriptions, expectedResults);
+        }
+
+        [Fact]
+        public void VerifyDescriptionIsGenerated_WhenRouteParameterIsNotInAction()
+        {
+            Type controllerType = typeof(ItemController);
+            HttpConfiguration config = new HttpConfiguration();
+            config.Routes.MapHttpRoute("Custom", "{majorVersion}/{minorVersion}/custom", new { controller = "Item" });
+            config.Routes.MapHttpRoute("Default", "{version}/{controller}/{id}", new { id = RouteParameter.Optional });
+            DefaultHttpControllerSelector controllerSelector = ApiExplorerHelper.GetStrictControllerSelector(config, controllerType);
+            config.Services.Replace(typeof(IHttpControllerSelector), controllerSelector);
+
+            IApiExplorer explorer = config.Services.GetApiExplorer();
+            Collection<ApiDescription> descriptions = explorer.ApiDescriptions;
+
+            List<object> expectedResults = new List<object>
+            {
+                new { HttpMethod = HttpMethod.Get, RelativePath = "{majorVersion}/{minorVersion}/custom?name={name}&series={series}", HasRequestFormatters = false, HasResponseFormatters = true, NumberOfParameters = 4},
+                new { HttpMethod = HttpMethod.Post, RelativePath = "{majorVersion}/{minorVersion}/custom", HasRequestFormatters = true, HasResponseFormatters = true, NumberOfParameters = 3},
+                new { HttpMethod = HttpMethod.Put, RelativePath = "{majorVersion}/{minorVersion}/custom", HasRequestFormatters = true, HasResponseFormatters = true, NumberOfParameters = 3},
+                new { HttpMethod = HttpMethod.Delete, RelativePath = "{majorVersion}/{minorVersion}/custom?id={id}", HasRequestFormatters = false, HasResponseFormatters = false, NumberOfParameters = 3},
+                new { HttpMethod = HttpMethod.Get, RelativePath = "{version}/Item?name={name}&series={series}", HasRequestFormatters = false, HasResponseFormatters = true, NumberOfParameters = 3},
+                new { HttpMethod = HttpMethod.Post, RelativePath = "{version}/Item", HasRequestFormatters = true, HasResponseFormatters = true, NumberOfParameters = 2},
+                new { HttpMethod = HttpMethod.Put, RelativePath = "{version}/Item", HasRequestFormatters = true, HasResponseFormatters = true, NumberOfParameters = 2},
+                new { HttpMethod = HttpMethod.Delete, RelativePath = "{version}/Item/{id}", HasRequestFormatters = false, HasResponseFormatters = false, NumberOfParameters = 2}
+            };
+            ApiExplorerHelper.VerifyApiDescriptions(descriptions, expectedResults);
         }
     }
 }

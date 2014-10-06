@@ -1,5 +1,7 @@
 ﻿// Copyright (c) Microsoft Open Technologies, Inc. All rights reserved. See License.txt in the project root for license information.
 
+using System;
+using System.Web;
 using System.Web.Security;
 
 namespace Microsoft.Web.Mvc
@@ -8,14 +10,26 @@ namespace Microsoft.Web.Mvc
 
     internal sealed class MachineKeyWrapper : IMachineKey
     {
-        public byte[] Decode(string encodedData, MachineKeyProtection protectionOption)
+        private static readonly MachineKeyWrapper _singletonInstance = new MachineKeyWrapper();
+
+        public static MachineKeyWrapper Instance
         {
-            return MachineKey.Decode(encodedData, protectionOption);
+            get
+            {
+                return _singletonInstance;
+            }
         }
 
-        public string Encode(byte[] data, MachineKeyProtection protectionOption)
+        public byte[] Unprotect(string protectedData, params string[] purposes)
         {
-            return MachineKey.Encode(data, protectionOption);
+            byte[] protectedBytes = Convert.FromBase64String(protectedData);
+            return MachineKey.Unprotect(protectedBytes, purposes);
+        }
+
+        public string Protect(byte[] userData, params string[] purposes)
+        {
+            byte[] protectedBytes = MachineKey.Protect(userData, purposes);
+            return Convert.ToBase64String(protectedBytes);
         }
     }
 }

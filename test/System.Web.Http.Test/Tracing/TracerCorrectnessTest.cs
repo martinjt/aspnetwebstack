@@ -38,6 +38,8 @@ namespace System.Web.Http.Tracing
                     { typeof(IActionFilter), typeof(ActionFilterTracer), new string[0] },
                     { typeof(AuthorizationFilterAttribute), typeof(AuthorizationFilterAttributeTracer), new string[0] },
                     { typeof(IAuthorizationFilter), typeof(AuthorizationFilterTracer), new string[0] },
+                    { typeof(IAuthenticationFilter), typeof(AuthenticationFilterTracer), new string[0] },
+                    { typeof(IOverrideFilter), typeof(OverrideFilterTracer), new string[0] },
                     { typeof(BufferedMediaTypeFormatter), typeof(BufferedMediaTypeFormatterTracer), new string[] 
                         {
                             // Values copied in ctor
@@ -167,15 +169,19 @@ namespace System.Web.Http.Tracing
                             "get_RequiredMemberSelector", "set_RequiredMemberSelector",
                             "get_UseXmlSerializer", "set_UseXmlSerializer",
                             "get_Indent", "set_Indent",
+                            "get_WriterSettings",
                             "get_MaxDepth", "set_MaxDepth",
+                            "InvokeCreateXmlReader", "InvokeCreateXmlWriter", 
+                            "InvokeGetDeserializer", "InvokeGetSerializer",
                             // Cannot override, base handles correctly
                             "SelectCharacterEncoding",
                             // Assume these are called before starting app.
                             // Tracer does not need to see them,
                             // and inner will uses its copies in read or write
-                            "SetSerializer", "RemoveSerializer"
+                            "SetSerializer", "RemoveSerializer",
                         }
                     },
+                    { typeof(DefaultHttpControllerTypeResolver), typeof(DefaultHttpControllerTypeResolverTracer), new string[0] },
                 };
             }
         }
@@ -277,7 +283,7 @@ namespace System.Web.Http.Tracing
             return issues;
         }
 
-        static void AddIssues(Type tracerType, IList<string> issues, MethodInfo methodInfo, string[] excludedMembers)
+        private static void AddIssues(Type tracerType, IList<string> issues, MethodInfo methodInfo, string[] excludedMembers)
         {
             if (methodInfo == null ||
                 !(methodInfo.IsPublic || methodInfo.IsFamily) ||
@@ -287,7 +293,7 @@ namespace System.Web.Http.Tracing
             }
 
             // Allow exclusion list to be short name or long name, because some members are up the inheritance chain
-            string visibleMemberName = String.Format("{0}.{1}", methodInfo.DeclaringType.Name, methodInfo.Name);
+            string visibleMemberName = String.Format("{0}.{1}", methodInfo.DeclaringType.Name, GetSignature(methodInfo));
             if (!DoesTracerDeclare(tracerType, methodInfo) && !excludedMembers.Contains(visibleMemberName) && !excludedMembers.Contains(methodInfo.Name))
             {
                 bool isOverrideable = IsOverrideable(methodInfo);
@@ -305,14 +311,14 @@ namespace System.Web.Http.Tracing
             }
         }
 
-        static bool IsOverrideable(MethodInfo methodInfo)
+        private static bool IsOverrideable(MethodInfo methodInfo)
         {
             return !methodInfo.IsFinal && (methodInfo.IsVirtual || methodInfo.IsAbstract);
         }
 
-        static bool DoMethodsMatch(MethodInfo originalMethodInfo, MethodInfo candidateMethodInfo)
+        private static bool DoMethodsMatch(MethodInfo originalMethodInfo, MethodInfo candidateMethodInfo)
         {
-            if (!candidateMethodInfo.Name.Substring(candidateMethodInfo.Name.LastIndexOf('.') + 1).Equals(originalMethodInfo.Name))
+            if (!GetSignature(candidateMethodInfo).Equals(GetSignature(originalMethodInfo)))
             {
                 return false;
             }
@@ -320,7 +326,14 @@ namespace System.Web.Http.Tracing
             return true;
         }
 
-        static bool DoesTracerDeclare(Type tracerType, MethodInfo methodInfo)
+        private static string GetSignature(MethodInfo methodInfo)
+        {
+            return
+                String.Format("{0}({1})", methodInfo.Name.Substring(methodInfo.Name.LastIndexOf(".") + 1),
+                    String.Join(",", methodInfo.GetParameters().Select(p => p.ParameterType.Name)));
+        }
+
+        private static bool DoesTracerDeclare(Type tracerType, MethodInfo methodInfo)
         {
             if (methodInfo == null)
             {

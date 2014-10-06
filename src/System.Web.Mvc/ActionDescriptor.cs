@@ -15,12 +15,12 @@ namespace System.Web.Mvc
         private static readonly ActionMethodDispatcherCache _staticDispatcherCache = new ActionMethodDispatcherCache();
 
         private static readonly ActionSelector[] _emptySelectors = new ActionSelector[0];
-        private readonly Lazy<string> _uniqueId;
+        private static readonly ActionNameSelector[] _emptyNameSelectors = new ActionNameSelector[0];
+        private string _uniqueId;
         private ActionMethodDispatcherCache _instanceDispatcherCache;
 
         protected ActionDescriptor()
         {
-            _uniqueId = new Lazy<string>(CreateUniqueId);
         }
 
         public abstract string ActionName { get; }
@@ -43,7 +43,14 @@ namespace System.Web.Mvc
         [SuppressMessage("Microsoft.Security", "CA2119:SealMethodsThatSatisfyPrivateInterfaces", Justification = "This is overridden elsewhere in System.Web.Mvc")]
         public virtual string UniqueId
         {
-            get { return _uniqueId.Value; }
+            get 
+            {
+                if (_uniqueId == null)
+                {
+                    _uniqueId = CreateUniqueId();
+                }
+                return _uniqueId; 
+            }
         }
 
         private string CreateUniqueId()
@@ -143,6 +150,12 @@ namespace System.Web.Mvc
         public virtual ICollection<ActionSelector> GetSelectors()
         {
             return _emptySelectors;
+        }
+
+        [SuppressMessage("Microsoft.Design", "CA1024:UsePropertiesWhereAppropriate", Justification = "This method may perform non-trivial work.")]
+        internal virtual ICollection<ActionNameSelector> GetNameSelectors()
+        {
+            return _emptyNameSelectors;
         }
 
         public virtual bool IsDefined(Type attributeType, bool inherit)

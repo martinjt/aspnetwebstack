@@ -7,7 +7,7 @@ namespace System.Web.Mvc
 {
     public class DictionaryValueProvider<TValue> : IValueProvider, IEnumerableValueProvider
     {
-        private readonly Lazy<PrefixContainer> _prefixContainer;
+        private PrefixContainer _prefixContainer;
         private readonly Dictionary<string, ValueProviderResult> _values = new Dictionary<string, ValueProviderResult>(StringComparer.OrdinalIgnoreCase);
 
         public DictionaryValueProvider(IDictionary<string, TValue> dictionary, CultureInfo culture)
@@ -23,13 +23,24 @@ namespace System.Web.Mvc
                 string attemptedValue = Convert.ToString(rawValue, culture);
                 _values[entry.Key] = new ValueProviderResult(rawValue, attemptedValue, culture);
             }
+        }
 
-            _prefixContainer = new Lazy<PrefixContainer>(() => new PrefixContainer(_values.Keys), isThreadSafe: true);
+        private PrefixContainer PrefixContainer
+        {
+            get
+            {
+                if (_prefixContainer == null)
+                {
+                    // Race condition on initialization has no side effects
+                    _prefixContainer = new PrefixContainer(_values.Keys);
+                }
+                return _prefixContainer;
+            }
         }
 
         public virtual bool ContainsPrefix(string prefix)
         {
-            return _prefixContainer.Value.ContainsPrefix(prefix);
+            return PrefixContainer.ContainsPrefix(prefix);
         }
 
         public virtual ValueProviderResult GetValue(string key)
@@ -46,7 +57,7 @@ namespace System.Web.Mvc
 
         public virtual IDictionary<string, string> GetKeysFromPrefix(string prefix)
         {
-            return _prefixContainer.Value.GetKeysFromPrefix(prefix);
+            return PrefixContainer.GetKeysFromPrefix(prefix);
         }
     }
 }

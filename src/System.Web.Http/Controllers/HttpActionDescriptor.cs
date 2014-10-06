@@ -21,6 +21,8 @@ namespace System.Web.Http.Controllers
 
         private IActionResultConverter _converter;
         private readonly Lazy<Collection<FilterInfo>> _filterPipeline;
+        private FilterGrouping _filterGrouping;
+        private Collection<FilterInfo> _filterPipelineForGrouping;
 
         private HttpConfiguration _configuration;
         private HttpControllerDescriptor _controllerDescriptor;
@@ -115,7 +117,13 @@ namespace System.Web.Http.Controllers
         /// <see cref="HttpResponseMessage"/>. 
         /// </summary>
         /// <remarks>
+        /// <para>This converter is not used when the runtime return value of an action is an <see cref="IHttpActionResult"/>.</para>
+        /// <para>
+        /// This value is <see langword="null" /> when the declared <see cref="ReturnType"/> is an <see cref="IHttpActionResult"/>.
+        /// </para>
+        /// <para>
         /// The behavior of the returned converter should align with the action's declared <see cref="ReturnType"/>.
+        /// </para>
         /// </remarks>
         public virtual IActionResultConverter ResultConverter
         {
@@ -145,7 +153,23 @@ namespace System.Web.Http.Controllers
             get { return _properties; }
         }
 
+        /// <summary>
+        /// Gets the custom attributes.
+        /// </summary>
+        /// <typeparam name="T"></typeparam>
+        /// <returns></returns>
         public virtual Collection<T> GetCustomAttributes<T>() where T : class
+        {
+            return GetCustomAttributes<T>(inherit: true);
+        }
+
+        /// <summary>
+        /// Gets the custom attributes for the action.
+        /// </summary>
+        /// <typeparam name="T">The type of attribute to search for.</typeparam>
+        /// <param name="inherit"><c>true</c> to search this action's inheritance chain to find the attributes; otherwise, <c>false</c>.</param>
+        /// <returns>The collection of custom attributes applied to this action.</returns>
+        public virtual Collection<T> GetCustomAttributes<T>(bool inherit) where T : class
         {
             return new Collection<T>();
         }
@@ -176,6 +200,10 @@ namespace System.Web.Http.Controllers
             {
                 return _responseMessageResultConverter;
             }
+            else if (typeof(IHttpActionResult).IsAssignableFrom(type))
+            {
+                return null;
+            }
             else
             {
                 Type valueConverterType = typeof(ValueResultConverter<>).MakeGenericType(type);
@@ -189,7 +217,7 @@ namespace System.Web.Http.Controllers
         /// </summary>
         /// <param name="controllerContext">The context.</param>
         /// <param name="arguments">The arguments.</param>
-        /// <param name="cancellationToken">The cancellation token.</param>
+        /// <param name="cancellationToken">The token to monitor for cancellation requests.</param>
         /// <returns>A <see cref="Task{T}"/> that once completed will contain the return value of the action.</returns>
         public abstract Task<object> ExecuteAsync(HttpControllerContext controllerContext, IDictionary<string, object> arguments, CancellationToken cancellationToken);
 
@@ -207,6 +235,20 @@ namespace System.Web.Http.Controllers
         public virtual Collection<FilterInfo> GetFilterPipeline()
         {
             return _filterPipeline.Value;
+        }
+
+        internal FilterGrouping GetFilterGrouping()
+        {
+            // Performance-sensitive
+            // Filter grouping is expensive so cache whenever possible
+            // For compatibility, the virtual method must be called
+            Collection<FilterInfo> currentFilterPipeline = GetFilterPipeline();
+            if (_filterGrouping == null || _filterPipelineForGrouping != currentFilterPipeline)
+            {
+                _filterGrouping = new FilterGrouping(currentFilterPipeline);
+                _filterPipelineForGrouping = currentFilterPipeline;
+            }
+            return _filterGrouping;
         }
 
         private Collection<FilterInfo> InitializeFilterPipeline()

@@ -1,7 +1,9 @@
 ﻿// Copyright (c) Microsoft Open Technologies, Inc. All rights reserved. See License.txt in the project root for license information.
 
+using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
+using System.Web.Routing;
 using System.Web.WebPages.Scope;
 
 namespace System.Web.WebPages.Html
@@ -197,6 +199,47 @@ namespace System.Web.WebPages.Html
         public IHtmlString Raw(object value)
         {
             return new HtmlString(value == null ? null : value.ToString());
+        }
+
+        /// <summary>
+        /// Creates a dictionary of HTML attributes from the input object, 
+        /// translating underscores to dashes.
+        /// </summary>
+        /// <example>
+        /// new <c>{ data_name="value" }</c> will translate to the entry <c>{ "data-name" , "value" }</c>
+        /// in the resulting dictionary.
+        /// </example>
+        /// <param name="htmlAttributes">Anonymous object describing HTML attributes.</param>
+        /// <returns>A dictionary that represents HTML attributes.</returns>
+        public static RouteValueDictionary AnonymousObjectToHtmlAttributes(object htmlAttributes)
+        {
+            RouteValueDictionary result = new RouteValueDictionary();
+
+            if (htmlAttributes != null)
+            {
+                foreach (PropertyHelper property in HtmlAttributePropertyHelper.GetProperties(htmlAttributes))
+                {
+                    result.Add(property.Name, property.GetValue(htmlAttributes));
+                }
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Creates a dictionary from an object, by adding each public instance property as a key with its associated 
+        /// value to the dictionary. It will expose public properties from derived types as well. This is typically used
+        /// with objects of an anonymous type.
+        /// </summary>
+        /// <example>
+        /// <c>new { property_name = "value" }</c> will translate to the entry <c>{ "property_name" , "value" }</c>
+        /// in the resulting dictionary.
+        /// </example>
+        /// <param name="value">The object to be converted.</param>
+        /// <returns>The created dictionary of property names and property values.</returns>
+        public static IDictionary<string, object> ObjectToDictionary(object value)
+        {
+            return TypeHelper.ObjectToDictionary(value);
         }
     }
 }

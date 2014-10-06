@@ -29,6 +29,92 @@ namespace System.Web.Mvc.Test
         }
 
         [Fact]
+        public void FilterProviderCollectionCombinedItemsCaches()
+        {
+            // Arrange
+            var providers = new IFilterProvider[] 
+            {
+                new Mock<IFilterProvider>(MockBehavior.Strict).Object, 
+                new Mock<IFilterProvider>(MockBehavior.Strict).Object
+            };
+            var collection = new FilterProviderCollection(providers);
+
+            // Act
+            IFilterProvider[] combined1 = collection.CombinedItems;
+            IFilterProvider[] combined2 = collection.CombinedItems;
+
+            // Assert
+            Assert.Equal(providers, combined1);
+            Assert.Same(combined1, combined2);
+        }
+
+        [Fact]
+        public void FilterProviderCollectionCombinedItemsClearResetsCache()
+        {
+            TestCacheReset((collection) => collection.Clear());
+        }
+
+        [Fact]
+        public void FilterProviderCollectionCombinedItemsInsertResetsCache()
+        {
+            TestCacheReset((collection) => collection.Insert(0, new Mock<IFilterProvider>(MockBehavior.Strict).Object));
+        }
+
+        [Fact]
+        public void FilterProviderCollectionCombinedItemsRemoveResetsCache()
+        {
+            TestCacheReset((collection) => collection.RemoveAt(0));
+        }
+
+        [Fact]
+        public void FilterProviderCollectionCombinedItemsSetResetsCache()
+        {
+            TestCacheReset((collection) => collection[0] = new Mock<IFilterProvider>(MockBehavior.Strict).Object);
+        }
+
+        private static void TestCacheReset(Action<FilterProviderCollection> mutatingAction)
+        {
+            // Arrange
+            var providers = new List<IFilterProvider>() 
+            {
+                new Mock<IFilterProvider>(MockBehavior.Strict).Object, 
+                new Mock<IFilterProvider>(MockBehavior.Strict).Object
+            };
+            var collection = new FilterProviderCollection(providers);
+
+            // Act
+            mutatingAction(collection);
+
+            IFilterProvider[] combined = collection.CombinedItems;
+
+            // Assert
+            Assert.Equal(providers, combined);
+        }
+
+        [Fact]
+        public void FilterProviderCollectionCombinedItemsDelegatesToResolver()
+        {
+            // Arrange
+            var firstProvider = new Mock<IFilterProvider>();
+            var secondProvider = new Mock<IFilterProvider>();
+            var thirdProvider = new Mock<IFilterProvider>();
+            var dependencyProviders = new IFilterProvider[] { firstProvider.Object, secondProvider.Object };
+            var collectionProviders = new IFilterProvider[] { thirdProvider.Object };
+            var expectedProviders = new IFilterProvider[] { firstProvider.Object, secondProvider.Object, thirdProvider.Object };
+
+            Mock<IDependencyResolver> resolver = new Mock<IDependencyResolver>();
+            resolver.Setup(r => r.GetServices(typeof(IFilterProvider))).Returns(dependencyProviders);
+
+            var providers = new FilterProviderCollection(collectionProviders, resolver.Object);
+
+            // Act
+            IFilterProvider[] combined = providers.CombinedItems;
+
+            // Assert
+            Assert.Equal(expectedProviders, combined);
+        }
+
+        [Fact]
         public void GetFiltersUsesRegisteredProviders()
         {
             // Arrange
@@ -54,10 +140,13 @@ namespace System.Web.Mvc.Test
             var descriptor = new Mock<ActionDescriptor>().Object;
             var filter = new Filter(new Object(), FilterScope.Action, null);
             var provider = new Mock<IFilterProvider>(MockBehavior.Strict);
-            var resolver = new Resolver<IEnumerable<IFilterProvider>> { Current = new[] { provider.Object } };
-            var collection = new FilterProviderCollection(resolver);
-
             provider.Setup(p => p.GetFilters(context, descriptor)).Returns(new[] { filter });
+
+            Mock<IDependencyResolver> resolver = new Mock<IDependencyResolver>();
+            resolver.Setup(r => r.GetServices(typeof(IFilterProvider))).Returns(new[] { provider.Object });
+
+
+            var collection = new FilterProviderCollection(new IFilterProvider[0], resolver.Object);
 
             // Act
             IEnumerable<Filter> result = collection.GetFilters(context, descriptor);

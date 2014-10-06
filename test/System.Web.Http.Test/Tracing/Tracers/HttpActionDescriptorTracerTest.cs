@@ -9,6 +9,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Web.Http.Controllers;
 using System.Web.Http.Filters;
+using System.Web.Http.Services;
 using Microsoft.TestCommon;
 using Moq;
 
@@ -324,7 +325,7 @@ namespace System.Web.Http.Tracing.Tracers
             Mock<HttpActionDescriptor> mockActionDescriptor = new Mock<HttpActionDescriptor>() { CallBase = true };
             mockActionDescriptor.Setup(a => a.ActionName).Returns("test");
             mockActionDescriptor.Setup(a => a.ExecuteAsync(It.IsAny<HttpControllerContext>(), It.IsAny<IDictionary<string, object>>(), CancellationToken.None))
-                .Returns(TaskHelpers.FromResult<object>(null));
+                .Returns(Task.FromResult<object>(null));
             HttpControllerContext controllerContext = ContextUtil.CreateControllerContext();
             controllerContext.ControllerDescriptor = new HttpControllerDescriptor(controllerContext.Configuration, "test", typeof(ApiController));
             IDictionary<string, object> arguments = new Dictionary<string, object>();
@@ -370,6 +371,36 @@ namespace System.Web.Http.Tracing.Tracers
             // Assert
             Assert.Equal<TraceRecord>(expectedTraces, traceWriter.Traces, new TraceRecordComparer());
             Assert.Same(exception, traceWriter.Traces[1].Exception);
+        }
+
+        [Fact]
+        public void Inner_Property_On_HttpActionDescriptorTracer_Returns_HttpActionDescriptor()
+        {
+            // Arrange
+            HttpActionDescriptor expectedInner = new Mock<HttpActionDescriptor>().Object;
+            HttpControllerContext controllerContext = ContextUtil.CreateControllerContext();
+            HttpActionDescriptorTracer productUnderTest = new HttpActionDescriptorTracer(controllerContext, expectedInner, new TestTraceWriter());
+
+            // Act
+            HttpActionDescriptor actualInner = productUnderTest.Inner;
+
+            // Assert
+            Assert.Same(expectedInner, actualInner);
+        }
+
+        [Fact]
+        public void Decorator_GetInner_On_HttpActionDescriptorTracer_Returns_HttpActionDescriptor()
+        {
+            // Arrange
+            HttpActionDescriptor expectedInner = new Mock<HttpActionDescriptor>().Object;
+            HttpControllerContext controllerContext = ContextUtil.CreateControllerContext();
+            HttpActionDescriptorTracer productUnderTest = new HttpActionDescriptorTracer(controllerContext, expectedInner, new TestTraceWriter());
+
+            // Act
+            HttpActionDescriptor actualInner = Decorator.GetInner(productUnderTest as HttpActionDescriptor);
+
+            // Assert
+            Assert.Same(expectedInner, actualInner);
         }
     }
 }

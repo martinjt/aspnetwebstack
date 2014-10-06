@@ -292,7 +292,7 @@ namespace System.Web.Http.Tracing
         /// <param name="category">The logical category of the trace.</param>
         /// <param name="level">The <see cref="TraceLevel"/> of the trace.</param>
         /// <param name="operatorName">The name of the object performing the operation.  It may be null.</param>
-        /// <param name="operationName">The name of the operation being performaed.  It may be null.</param>
+        /// <param name="operationName">The name of the operation being performed.  It may be null.</param>
         /// <param name="beginTrace">The <see cref="Action"/> to invoke prior to performing the operation, 
         /// allowing the given <see cref="TraceRecord"/> to be filled in.  It may be null.</param>
         /// <param name="execute">An <see cref="Action"/> that performs the operation.</param>
@@ -354,24 +354,9 @@ namespace System.Web.Http.Tracing
                         }
                     });
             }
-            catch (Exception ex)
+            catch (Exception exception)
             {
-                traceWriter.Trace(
-                    request,
-                    category,
-                    TraceLevel.Error,
-                    (TraceRecord traceRecord) =>
-                    {
-                        traceRecord.Kind = TraceKind.End;
-                        traceRecord.Operator = operatorName;
-                        traceRecord.Operation = operationName;
-                        traceRecord.Exception = ex;
-                        if (errorTrace != null)
-                        {
-                            errorTrace(traceRecord);
-                        }
-                    });
-
+                traceWriter.TraceError(exception, request, category, operatorName, operationName, errorTrace);
                 throw;
             }
         }
@@ -444,85 +429,67 @@ namespace System.Web.Http.Tracing
                     return task;
                 }
 
-                return task
-                    .Then<TResult, TResult>((result) =>
-                    {
-                        traceWriter.Trace(
-                            request,
-                            category,
-                            level,
-                            (TraceRecord traceRecord) =>
-                            {
-                                traceRecord.Kind = TraceKind.End;
-                                traceRecord.Operator = operatorName;
-                                traceRecord.Operation = operationName;
-                                if (endTrace != null)
-                                {
-                                    endTrace(traceRecord, result);
-                                }
-                            });
-
-                        return result;
-                    })
-                    .Catch<TResult>((info) =>
-                        {
-                            traceWriter.Trace(
-                                request,
-                                category,
-                                TraceLevel.Error,
-                                (TraceRecord traceRecord) =>
-                                {
-                                    traceRecord.Kind = TraceKind.End;
-                                    traceRecord.Exception = info.Exception.GetBaseException();
-                                    traceRecord.Operator = operatorName;
-                                    traceRecord.Operation = operationName;
-                                    if (errorTrace != null)
-                                    {
-                                        errorTrace(traceRecord);
-                                    }
-                                });
-
-                            return info.Throw();
-                        })
-                    .Finally(() =>
-                        {
-                            if (task.IsCanceled)
-                            {
-                                traceWriter.Trace(
-                                    request,
-                                    category,
-                                    TraceLevel.Warn,
-                                    (TraceRecord traceRecord) =>
-                                    {
-                                        traceRecord.Kind = TraceKind.End;
-                                        traceRecord.Operator = operatorName;
-                                        traceRecord.Operation = operationName;
-                                        traceRecord.Message = SRResources.TraceCancelledMessage;
-                                        if (errorTrace != null)
-                                        {
-                                            errorTrace(traceRecord);
-                                        }
-                                    });
-                            }
-                        });
+                return traceWriter.TraceBeginEndAsyncCore<TResult>(request, category, level, operatorName, operationName, endTrace, errorTrace, task);
             }
-            catch (Exception ex)
+            catch (Exception exception)
             {
+                traceWriter.TraceError(exception, request, category, operatorName, operationName, errorTrace);
+                throw;
+            }
+        }
+
+        private static async Task<TResult> TraceBeginEndAsyncCore<TResult>(this ITraceWriter traceWriter,
+            HttpRequestMessage request,
+            string category, TraceLevel level,
+            string operatorName,
+            string operationName,
+            Action<TraceRecord, TResult> endTrace,
+            Action<TraceRecord> errorTrace,
+            Task<TResult> task)
+        {
+            try
+            {
+                TResult result = await task;
                 traceWriter.Trace(
                     request,
                     category,
-                    TraceLevel.Error,
+                    level,
                     (TraceRecord traceRecord) =>
                     {
                         traceRecord.Kind = TraceKind.End;
                         traceRecord.Operator = operatorName;
                         traceRecord.Operation = operationName;
-                        traceRecord.Exception = ex;
-                        if (errorTrace != null)
+                        if (endTrace != null)
                         {
-                            errorTrace(traceRecord);
+                            endTrace(traceRecord, result);
                         }
                     });
+
+                return result;
+            }
+            catch (OperationCanceledException)
+            {
+                traceWriter.Trace(
+                        request,
+                        category,
+                        TraceLevel.Warn,
+                        (TraceRecord traceRecord) =>
+                        {
+                            traceRecord.Kind = TraceKind.End;
+                            traceRecord.Operator = operatorName;
+                            traceRecord.Operation = operationName;
+                            traceRecord.Message = SRResources.TraceCancelledMessage;
+                            if (errorTrace != null)
+                            {
+                                errorTrace(traceRecord);
+                            }
+                        });
+
+                throw;
+            }
+            catch (Exception exception)
+            {
+                traceWriter.TraceError(exception, request, category, operatorName, operationName, errorTrace);
                 throw;
             }
         }
@@ -592,83 +559,66 @@ namespace System.Web.Http.Tracing
                     return task;
                 }
 
-                return task
-                    .Then(() =>
-                    {
-                        traceWriter.Trace(
-                            request,
-                            category,
-                            level,
-                            (TraceRecord traceRecord) =>
-                            {
-                                traceRecord.Kind = TraceKind.End;
-                                traceRecord.Operator = operatorName;
-                                traceRecord.Operation = operationName;
-                                if (endTrace != null)
-                                {
-                                    endTrace(traceRecord);
-                                }
-                            });
-                    })
-                    .Catch((info) =>
-                    {
-                        traceWriter.Trace(
-                            request,
-                            category,
-                            TraceLevel.Error,
-                            (TraceRecord traceRecord) =>
-                            {
-                                traceRecord.Kind = TraceKind.End;
-                                traceRecord.Exception = info.Exception.GetBaseException();
-                                traceRecord.Operator = operatorName;
-                                traceRecord.Operation = operationName;
-                                if (errorTrace != null)
-                                {
-                                    errorTrace(traceRecord);
-                                }
-                            });
-
-                        return info.Throw(info.Exception);
-                    })
-                    .Finally(() =>
-                    {
-                        if (task.IsCanceled)
-                        {
-                            traceWriter.Trace(
-                                request,
-                                category,
-                                TraceLevel.Warn,
-                                (TraceRecord traceRecord) =>
-                                {
-                                    traceRecord.Kind = TraceKind.End;
-                                    traceRecord.Operator = operatorName;
-                                    traceRecord.Operation = operationName;
-                                    traceRecord.Message = SRResources.TraceCancelledMessage;
-                                    if (errorTrace != null)
-                                    {
-                                        errorTrace(traceRecord);
-                                    }
-                                });
-                        }
-                    });
+                return traceWriter.TraceBeginEndAsyncCore(request, category, level, operatorName, operationName, endTrace, errorTrace, task);
             }
-            catch (Exception ex)
+            catch (Exception exception)
+            {
+                traceWriter.TraceError(exception, request, category, operatorName, operationName, errorTrace);
+                throw;
+            }
+        }
+
+        private static async Task TraceBeginEndAsyncCore(this ITraceWriter traceWriter,
+            HttpRequestMessage request,
+            string category,
+            TraceLevel level,
+            string operatorName,
+            string operationName,
+            Action<TraceRecord> endTrace,
+            Action<TraceRecord> errorTrace,
+            Task task)
+        {
+            try
+            {
+                await task;
+                traceWriter.Trace(
+                        request,
+                        category,
+                        level,
+                        (TraceRecord traceRecord) =>
+                        {
+                            traceRecord.Kind = TraceKind.End;
+                            traceRecord.Operator = operatorName;
+                            traceRecord.Operation = operationName;
+                            if (endTrace != null)
+                            {
+                                endTrace(traceRecord);
+                            }
+                        });
+            }
+            catch (OperationCanceledException)
             {
                 traceWriter.Trace(
-                    request,
-                    category,
-                    TraceLevel.Error,
-                    (TraceRecord traceRecord) =>
-                    {
-                        traceRecord.Kind = TraceKind.End;
-                        traceRecord.Operator = operatorName;
-                        traceRecord.Operation = operationName;
-                        traceRecord.Exception = ex;
-                        if (errorTrace != null)
+                        request,
+                        category,
+                        TraceLevel.Warn,
+                        (TraceRecord traceRecord) =>
                         {
-                            errorTrace(traceRecord);
-                        }
-                    });
+                            traceRecord.Kind = TraceKind.End;
+                            traceRecord.Operator = operatorName;
+                            traceRecord.Operation = operationName;
+                            traceRecord.Message = SRResources.TraceCancelledMessage;
+                            if (errorTrace != null)
+                            {
+                                errorTrace(traceRecord);
+                            }
+                        });
+
+                throw;
+            }
+            catch (Exception exception)
+            {
+                traceWriter.TraceError(exception, request, category, operatorName, operationName, errorTrace);
                 throw;
             }
         }
@@ -713,6 +663,24 @@ namespace System.Web.Http.Tracing
         public static void Warn(this ITraceWriter traceWriter, HttpRequestMessage request, string category, Exception exception, string messageFormat, params object[] messageArguments)
         {
             Trace(traceWriter, request, category, TraceLevel.Warn, exception, messageFormat, messageArguments);
+        }
+
+        private static void TraceError(this ITraceWriter traceWriter, Exception exception, HttpRequestMessage request,
+            string category, string operatorName, string operationName, Action<TraceRecord> errorTrace)
+        {
+            TraceLevel traceLevel = TraceWriterExceptionMapper.GetMappedTraceLevel(exception) ?? TraceLevel.Error;
+            traceWriter.Trace(request, category, traceLevel, (traceRecord) =>
+                {
+                    traceRecord.Kind = TraceKind.End;
+                    traceRecord.Operator = operatorName;
+                    traceRecord.Operation = operationName;
+                    traceRecord.Exception = exception;
+                    TraceWriterExceptionMapper.TranslateHttpResponseException(traceRecord);
+                    if (errorTrace != null)
+                    {
+                        errorTrace(traceRecord);
+                    }
+                });
         }
     }
 }

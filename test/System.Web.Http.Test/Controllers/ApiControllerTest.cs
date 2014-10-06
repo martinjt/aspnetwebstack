@@ -2,6 +2,7 @@
 
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.ComponentModel.DataAnnotations;
 using System.Globalization;
 using System.Linq;
 using System.Net;
@@ -13,10 +14,14 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Web.Http.Controllers;
 using System.Web.Http.Dispatcher;
+using System.Web.Http.ExceptionHandling;
 using System.Web.Http.Filters;
+using System.Web.Http.Hosting;
+using System.Web.Http.Metadata;
 using System.Web.Http.ModelBinding;
 using System.Web.Http.Routing;
 using System.Web.Http.Services;
+using System.Web.Http.Validation;
 using Microsoft.TestCommon;
 using Moq;
 
@@ -294,7 +299,7 @@ namespace System.Web.Http
         }
 
         [Fact]
-        public void ExecuteAsync_InvokesAuthorizationFilters_ThenInvokesModelBinding_ThenInvokesActionFilters_ThenInvokesAction()
+        public void ExecuteAsync_InvokesAuthenticationFilters_ThenInvokesAuthorizationFilters_ThenInvokesModelBinding_ThenInvokesActionFilters_ThenInvokesAction()
         {
             List<string> log = new List<string>();
             Mock<ApiController> controllerMock = new Mock<ApiController>() { CallBase = true };
@@ -314,18 +319,40 @@ namespace System.Web.Http
                 log.Add("action filters");
                 return cont();
             });
-            var authFilterMock = CreateAuthorizationFilterMock((ac, ct, cont) =>
+            var authorizationFilterMock = CreateAuthorizationFilterMock((ac, ct, cont) =>
             {
-                log.Add("auth filters");
+                log.Add("authZ filters");
                 return cont();
             });
+            Mock<IAuthenticationFilter> authenticationFilterMock = new Mock<IAuthenticationFilter>();
+            authenticationFilterMock.Setup(f => f.AuthenticateAsync(It.IsAny<HttpAuthenticationContext>(),
+                It.IsAny<CancellationToken>())).Callback(() =>
+                    {
+                        log.Add("authN filters authenticate");
+                    }).Returns(() => Task.FromResult<object>(null));
+            IHttpActionResult innerResult = null;
+            Mock<IHttpActionResult> challengeResultMock = new Mock<IHttpActionResult>();
+            challengeResultMock.Setup(r => r.ExecuteAsync(It.IsAny<CancellationToken>())).Returns(async () =>
+            {
+                HttpResponseMessage response = await innerResult.ExecuteAsync(CancellationToken.None);
+                log.Add("authN filters challenge");
+                return response;
+            });
+            authenticationFilterMock.Setup(f => f.ChallengeAsync(It.IsAny<HttpAuthenticationChallengeContext>(),
+                It.IsAny<CancellationToken>()))
+                .Callback<HttpAuthenticationChallengeContext, CancellationToken>((c, t) =>
+                {
+                    innerResult = c.Result;
+                    c.Result = challengeResultMock.Object;
+                })
+                .Returns(() => Task.FromResult<object>(null));
 
             var selectorMock = new Mock<IHttpActionSelector>();
 
             Mock<HttpActionDescriptor> actionDescriptorMock = new Mock<HttpActionDescriptor>();
             actionDescriptorMock.Setup(ad => ad.ActionBinding).Returns(actionBindingMock.Object);
             actionDescriptorMock.Setup(ad => ad.GetFilterPipeline())
-                .Returns(new Collection<FilterInfo>(new List<FilterInfo>() { new FilterInfo(actionFilterMock.Object, FilterScope.Action), new FilterInfo(authFilterMock.Object, FilterScope.Action) }));
+                .Returns(new Collection<FilterInfo>(new List<FilterInfo>() { new FilterInfo(actionFilterMock.Object, FilterScope.Action), new FilterInfo(authorizationFilterMock.Object, FilterScope.Action), new FilterInfo(authenticationFilterMock.Object, FilterScope.Action) }));
 
             selectorMock.Setup(s => s.SelectAction(controllerContext)).Returns(actionDescriptorMock.Object);
 
@@ -345,7 +372,7 @@ namespace System.Web.Http
 
             Assert.NotNull(task);
             task.WaitUntilCompleted();
-            Assert.Equal(new string[] { "auth filters", "model binding", "action filters", "action" }, log.ToArray());
+            Assert.Equal(new string[] { "authN filters authenticate", "authZ filters", "model binding", "action filters", "action", "authN filters challenge" }, log.ToArray());
         }
 
         [Fact]
@@ -463,207 +490,182 @@ namespace System.Web.Http
         }
 
         [Fact]
-        public void InvokeActionWithActionFilters_ChainsFiltersInOrderFollowedByInnerActionContinuation()
+        public void ExecuteAsync_RunsExceptionFilter_WhenActionThrowsException()
         {
             // Arrange
-            List<string> log = new List<string>();
-            Mock<IActionFilter> globalFilterMock = CreateActionFilterMock((ctx, ct, continuation) =>
-            {
-                log.Add("globalFilter");
-                return continuation();
-            });
-            Mock<IActionFilter> actionFilterMock = CreateActionFilterMock((ctx, ct, continuation) =>
-            {
-                log.Add("actionFilter");
-                return continuation();
-            });
-            Func<Task<HttpResponseMessage>> innerAction = () => Task<HttpResponseMessage>.Factory.StartNew(() =>
-            {
-                log.Add("innerAction");
-                return null;
-            });
-            List<IActionFilter> filters = new List<IActionFilter>() {
-                globalFilterMock.Object,
-                actionFilterMock.Object,
-            };
+            Exception expectedException = new NotImplementedException();
+            ApiController controller = new ExceptionController(expectedException);
 
-            // Act
-            var result = ApiController.InvokeActionWithActionFilters(_actionContextInstance, CancellationToken.None, filters, innerAction);
-
-            // Assert
-            Assert.NotNull(result);
-            var resultTask = result();
-            Assert.NotNull(resultTask);
-            resultTask.WaitUntilCompleted();
-            Assert.Equal(new[] { "globalFilter", "actionFilter", "innerAction" }, log.ToArray());
-            globalFilterMock.Verify();
-            actionFilterMock.Verify();
+            // Act & Assert
+            TestExceptionFilter(controller, expectedException, configure: null);
         }
 
         [Fact]
-        public void InvokeActionWithAuthorizationFilters_ChainsFiltersInOrderFollowedByInnerActionContinuation()
+        public void ExecuteAsync_RunsExceptionFilter_WhenActionFilterThrowsException()
         {
             // Arrange
-            List<string> log = new List<string>();
-            Mock<IAuthorizationFilter> globalFilterMock = CreateAuthorizationFilterMock((ctx, ct, continuation) =>
+            Exception expectedException = new NotImplementedException();
+            ApiController controller = new ExceptionlessController();
+            Mock<IActionFilter> filterMock = new Mock<IActionFilter>();
+            filterMock.Setup(f => f.ExecuteActionFilterAsync(It.IsAny<HttpActionContext>(),
+                It.IsAny<CancellationToken>(), It.IsAny<Func<Task<HttpResponseMessage>>>())).Callback(() =>
             {
-                log.Add("globalFilter");
-                return continuation();
+                throw expectedException;
             });
-            Mock<IAuthorizationFilter> actionFilterMock = CreateAuthorizationFilterMock((ctx, ct, continuation) =>
-            {
-                log.Add("actionFilter");
-                return continuation();
-            });
-            Func<Task<HttpResponseMessage>> innerAction = () => Task<HttpResponseMessage>.Factory.StartNew(() =>
-            {
-                log.Add("innerAction");
-                return null;
-            });
-            List<IAuthorizationFilter> filters = new List<IAuthorizationFilter>() {
-                globalFilterMock.Object,
-                actionFilterMock.Object,
-            };
+            IActionFilter filter = filterMock.Object;
 
-            // Act
-            var result = ApiController.InvokeActionWithAuthorizationFilters(_actionContextInstance, CancellationToken.None, filters, innerAction);
-
-            // Assert
-            Assert.NotNull(result);
-            var resultTask = result();
-            Assert.NotNull(resultTask);
-            resultTask.WaitUntilCompleted();
-            Assert.Equal(new[] { "globalFilter", "actionFilter", "innerAction" }, log.ToArray());
-            globalFilterMock.Verify();
-            actionFilterMock.Verify();
+            // Act & Assert
+            TestExceptionFilter(controller, expectedException, (configuration) =>
+                { configuration.Filters.Add(filter); });
         }
 
         [Fact]
-        public void InvokeActionWithExceptionFilters_IfActionTaskIsSuccessful_ReturnsSuccessTask()
+        public void ExecuteAsync_RunsExceptionFilter_WhenAuthorizationFilterThrowsException()
         {
             // Arrange
-            List<string> log = new List<string>();
-            var response = new HttpResponseMessage();
-            var actionTask = TaskHelpers.FromResult(response);
-            var exceptionFilterMock = CreateExceptionFilterMock((ec, ct) =>
+            Exception expectedException = new NotImplementedException();
+            ApiController controller = new ExceptionlessController();
+            Mock<IAuthorizationFilter> filterMock = new Mock<IAuthorizationFilter>();
+            filterMock.Setup(f => f.ExecuteAuthorizationFilterAsync(It.IsAny<HttpActionContext>(),
+                It.IsAny<CancellationToken>(), It.IsAny<Func<Task<HttpResponseMessage>>>())).Callback(() =>
             {
-                log.Add("exceptionFilter");
-                return Task.Factory.StartNew(() => { });
+                throw expectedException;
             });
-            var filters = new[] { exceptionFilterMock.Object };
+            IAuthorizationFilter filter = filterMock.Object;
 
-            // Act
-            var result = ApiController.InvokeActionWithExceptionFilters(actionTask, _actionContextInstance, CancellationToken.None, filters);
-
-            // Assert
-            Assert.NotNull(result);
-            result.WaitUntilCompleted();
-            Assert.Equal(TaskStatus.RanToCompletion, result.Status);
-            Assert.Same(response, result.Result);
-            Assert.Equal(new string[] { }, log.ToArray());
+            // Act & Assert
+            TestExceptionFilter(controller, expectedException, (configuration) =>
+                { configuration.Filters.Add(filter); });
         }
 
         [Fact]
-        public void InvokeActionWithExceptionFilters_IfActionTaskIsCanceled_ReturnsCanceledTask()
+        public void ExecuteAsync_RunsExceptionFilter_WhenAuthenticationFilterAuthenticateThrowsException()
         {
             // Arrange
-            List<string> log = new List<string>();
-            var actionTask = TaskHelpers.Canceled<HttpResponseMessage>();
-            var exceptionFilterMock = CreateExceptionFilterMock((ec, ct) =>
-            {
-                log.Add("exceptionFilter");
-                return Task.Factory.StartNew(() => { });
-            });
-            var filters = new[] { exceptionFilterMock.Object };
+            Exception expectedException = new NotImplementedException();
+            ApiController controller = new ExceptionlessController();
+            Mock<IAuthenticationFilter> filterMock = new Mock<IAuthenticationFilter>();
+            filterMock.Setup(f => f.AuthenticateAsync(It.IsAny<HttpAuthenticationContext>(),
+                It.IsAny<CancellationToken>())).Callback(() =>
+                {
+                    throw expectedException;
+                });
+            IAuthenticationFilter filter = filterMock.Object;
 
-            // Act
-            var result = ApiController.InvokeActionWithExceptionFilters(actionTask, _actionContextInstance, CancellationToken.None, filters);
-
-            // Assert
-            Assert.NotNull(result);
-            result.WaitUntilCompleted();
-            Assert.Equal(TaskStatus.Canceled, result.Status);
-            Assert.Equal(new string[] { }, log.ToArray());
+            // Act & Assert
+            TestExceptionFilter(controller, expectedException, (configuration) =>
+            { configuration.Filters.Add(filter); });
         }
 
         [Fact]
-        public void InvokeActionWithExceptionFilters_IfActionTaskIsFaulted_ExecutesFiltersAndReturnsFaultedTaskIfNotHandled()
+        public void ExecuteAsync_RunsExceptionFilter_WhenAuthenticationFilterChallengeThrowsException()
         {
             // Arrange
-            List<string> log = new List<string>();
-            var exception = new Exception();
-            var actionTask = TaskHelpers.FromError<HttpResponseMessage>(exception);
-            Exception exceptionSeenByFilter = null;
-            var exceptionFilterMock = CreateExceptionFilterMock((ec, ct) =>
-            {
-                exceptionSeenByFilter = ec.Exception;
-                log.Add("exceptionFilter");
-                return Task.Factory.StartNew(() => { });
-            });
-            var filters = new[] { exceptionFilterMock.Object };
+            Exception expectedException = new NotImplementedException();
+            ApiController controller = new ExceptionlessController();
+            Mock<IAuthenticationFilter> filterMock = new Mock<IAuthenticationFilter>();
+            filterMock.Setup(f => f.AuthenticateAsync(It.IsAny<HttpAuthenticationContext>(),
+                It.IsAny<CancellationToken>())).Returns(() => Task.FromResult<object>(null));
+            filterMock.Setup(f => f.ChallengeAsync(It.IsAny<HttpAuthenticationChallengeContext>(),
+                It.IsAny<CancellationToken>())).Callback(() =>
+                {
+                    throw expectedException;
+                });
+            IAuthenticationFilter filter = filterMock.Object;
 
-            // Act
-            var result = ApiController.InvokeActionWithExceptionFilters(actionTask, _actionContextInstance, CancellationToken.None, filters);
+            // Act & Assert
+            TestExceptionFilter(controller, expectedException, (configuration) =>
+            { configuration.Filters.Add(filter); });
+        }
+
+        private static void TestExceptionFilter(ApiController controller, Exception expectedException,
+            Action<HttpConfiguration> configure)
+        {
+            // Arrange
+            Exception actualException = null;
+            IHttpRouteData routeData = new HttpRouteData(new HttpRoute());
+
+            using (HttpRequestMessage request = new HttpRequestMessage())
+            using (HttpConfiguration configuration = new HttpConfiguration())
+            using (HttpResponseMessage response = new HttpResponseMessage())
+            {
+                HttpControllerContext context = new HttpControllerContext(configuration, routeData, request);
+                HttpControllerDescriptor controllerDescriptor = new HttpControllerDescriptor(configuration,
+                    "Ignored", controller.GetType());
+                context.Controller = controller;
+                context.ControllerDescriptor = controllerDescriptor;
+
+                if (configure != null)
+                {
+                    configure.Invoke(configuration);
+                }
+
+                Mock<IExceptionFilter> spy = new Mock<IExceptionFilter>();
+                spy.Setup(f => f.ExecuteExceptionFilterAsync(It.IsAny<HttpActionExecutedContext>(),
+                    It.IsAny<CancellationToken>())).Returns<HttpActionExecutedContext, CancellationToken>(
+                    (c, i) =>
+                    {
+                        actualException = c.Exception;
+                        c.Response = response;
+                        return Task.FromResult<object>(null);
+                    });
+
+                configuration.Filters.Add(spy.Object);
+
+                // Act
+                HttpResponseMessage ignore = controller.ExecuteAsync(context, CancellationToken.None).Result;
+            }
 
             // Assert
-            Assert.NotNull(result);
-            result.WaitUntilCompleted();
-            Assert.Equal(TaskStatus.Faulted, result.Status);
-            Assert.Same(exception, result.Exception.InnerException);
-            Assert.Same(exception, exceptionSeenByFilter);
-            Assert.Equal(new string[] { "exceptionFilter" }, log.ToArray());
+            Assert.Same(expectedException, actualException);
         }
 
         [Fact]
-        public void InvokeActionWithExceptionFilters_IfActionTaskIsFaulted_ExecutesFiltersAndReturnsResultIfHandled()
+        public void ExecuteAsync_IfActionThrows_CallsExceptionServicesFromConfiguration()
         {
-            // Arrange
             List<string> log = new List<string>();
-            var exception = new Exception();
-            var actionTask = TaskHelpers.FromError<HttpResponseMessage>(exception);
-            HttpResponseMessage globalFilterResponse = new HttpResponseMessage();
-            HttpResponseMessage actionFilterResponse = new HttpResponseMessage();
-            HttpResponseMessage resultSeenByGlobalFilter = null;
-            var globalFilterMock = CreateExceptionFilterMock((ec, ct) =>
-            {
-                log.Add("globalFilter");
-                resultSeenByGlobalFilter = ec.Response;
-                ec.Response = globalFilterResponse;
-                return Task.Factory.StartNew(() => { });
-            });
-            var actionFilterMock = CreateExceptionFilterMock((ec, ct) =>
-            {
-                log.Add("actionFilter");
-                ec.Response = actionFilterResponse;
-                return Task.Factory.StartNew(() => { });
-            });
-            var filters = new[] { globalFilterMock.Object, actionFilterMock.Object };
+            Exception expectedException = new Exception();
+            ExceptionController controller = new ExceptionController(expectedException);
+
+            Mock<IExceptionLogger> exceptionLoggerMock = new Mock<IExceptionLogger>(MockBehavior.Strict);
+            exceptionLoggerMock
+                .Setup(h => h.LogAsync(It.IsAny<ExceptionLoggerContext>(), It.IsAny<CancellationToken>()))
+                .Returns<ExceptionLoggerContext, CancellationToken>((c, i) =>
+                {
+                    log.Add("logger");
+                    return Task.FromResult(0);
+                });
+            IExceptionLogger exceptionLogger = exceptionLoggerMock.Object;
+
+            Mock<IExceptionHandler> exceptionHandlerMock = new Mock<IExceptionHandler>(MockBehavior.Strict);
+            exceptionHandlerMock
+                .Setup(h => h.HandleAsync(It.IsAny<ExceptionHandlerContext>(), It.IsAny<CancellationToken>()))
+                .Returns<ExceptionHandlerContext, CancellationToken>((c, i) =>
+                {
+                    log.Add("handler");
+                    return Task.FromResult(0);
+                });
+            IExceptionHandler exceptionHandler = exceptionHandlerMock.Object;
+
+            HttpControllerContext controllerContext = ContextUtil.CreateControllerContext();
+
+            HttpControllerDescriptor controllerDescriptor = new HttpControllerDescriptor(
+                controllerContext.Configuration, "Get", typeof(ExceptionController));
+            controllerContext.ControllerDescriptor = controllerDescriptor;
+            controllerContext.Controller = controller;
+            controllerContext.Configuration.Services.Add(typeof(IExceptionLogger), exceptionLogger);
+            controllerContext.Configuration.Services.Replace(typeof(IExceptionHandler), exceptionHandler);
+            controllerContext.Configuration.Filters.Add(CreateStubExceptionFilter());
 
             // Act
-            var result = ApiController.InvokeActionWithExceptionFilters(actionTask, _actionContextInstance, CancellationToken.None, filters);
+            Task<HttpResponseMessage> task = controller.ExecuteAsync(controllerContext, CancellationToken.None);
 
             // Assert
-            Assert.NotNull(result);
-            result.WaitUntilCompleted();
-            Assert.Equal(TaskStatus.RanToCompletion, result.Status);
-            Assert.Same(globalFilterResponse, result.Result);
-            Assert.Same(actionFilterResponse, resultSeenByGlobalFilter);
-            Assert.Equal(new string[] { "actionFilter", "globalFilter" }, log.ToArray());
-        }
-
-        [Fact, RestoreThreadPrincipal]
-        public void User_ReturnsThreadPrincipal()
-        {
-            // Arrange
-            ApiController controller = new Mock<ApiController>().Object;
-            IPrincipal principal = new GenericPrincipal(new GenericIdentity("joe"), new string[0]);
-            Thread.CurrentPrincipal = principal;
-
-            // Act
-            IPrincipal result = controller.User;
-
-            // Assert
-            Assert.Same(result, principal);
+            Assert.NotNull(task);
+            Assert.Equal(TaskStatus.Faulted, task.Status);
+            Assert.NotNull(task.Exception);
+            Assert.Same(expectedException, task.Exception.GetBaseException());
+            Assert.Equal(new string[] { "logger", "handler" }, log.ToArray());
         }
 
         [Fact]
@@ -709,6 +711,476 @@ namespace System.Web.Http
             Assert.True(SpyDisposeController.DisposeWasCalled);
         }
 
+        [Fact]
+        public void ControllerContextDefault_IsNonNull()
+        {
+            // Arrange
+            ApiController controller = CreateFakeController();
+
+            // Act
+            HttpControllerContext context = controller.ControllerContext;
+
+            // Assert
+            Assert.NotNull(context);
+        }
+
+        [Fact]
+        public void RequestGet_ReturnsControllerContextRequest()
+        {
+            // Arrange
+            using (HttpRequestMessage expectedRequest = CreateRequest())
+            {
+                ApiController controller = CreateFakeController();
+                controller.ControllerContext = new HttpControllerContext
+                {
+                    Request = expectedRequest
+                };
+
+                // Act
+                HttpRequestMessage request = controller.Request;
+
+                // Assert
+                Assert.Same(expectedRequest, request);
+            }
+        }
+
+        [Fact]
+        public void RequestSet_Throws_WhenNull()
+        {
+            // Arrange
+            ApiController controller = CreateFakeController();
+
+            // Act & Assert
+            Assert.ThrowsArgumentNull(() => { controller.Request = null; }, "value");
+        }
+
+        [Fact]
+        public void RequestSet_UpdatesControllerContextRequest()
+        {
+            // Arrange
+            using (HttpRequestMessage expectedRequest = CreateRequest())
+            {
+                ApiController controller = CreateFakeController();
+                HttpControllerContext controllerContext = CreateControllerContext();
+                controller.ControllerContext = controllerContext;
+
+                // Act
+                controller.Request = expectedRequest;
+
+                // Assert
+                Assert.Same(expectedRequest, controllerContext.Request);
+            }
+        }
+
+        [Fact]
+        public void RequestSet_UpdatesRequestRequestContext()
+        {
+            // Arrange
+            using (HttpRequestMessage request = CreateRequest())
+            {
+                ApiController controller = CreateFakeController();
+                HttpRequestContext expectedRequestContext = CreateRequestContext();
+                controller.RequestContext = expectedRequestContext;
+
+                // Act
+                controller.Request = request;
+
+                // Assert
+                Assert.Same(expectedRequestContext, request.GetRequestContext());
+            }
+        }
+
+        [Fact]
+        public void RequestSet_Throws_WhenRequestHasConflictingRequestContext()
+        {
+            // Arrange
+            using (HttpRequestMessage request = CreateRequest())
+            {
+                ApiController controller = CreateFakeController();
+                HttpRequestContext otherRequestContext = CreateRequestContext();
+                request.SetRequestContext(otherRequestContext);
+                Assert.NotSame(controller.RequestContext, otherRequestContext); // Guard
+
+                // Act & Assert
+                Assert.Throws<InvalidOperationException>(() => { controller.Request = request; },
+                    "The request context property on the request must be null or match ApiController.RequestContext.");
+            }
+        }
+
+        [Fact]
+        public void RequestSet_UpdatesRequestRequestContext_WhenRequestHasNoContext()
+        {
+            // Arrange
+            using (HttpRequestMessage request = CreateRequest())
+            {
+                ApiController controller = CreateFakeController();
+                HttpRequestContext expectedRequestContext = CreateRequestContext();
+                controller.RequestContext = expectedRequestContext;
+                Assert.Null(request.GetRequestContext()); // Guard
+
+                // Act
+                controller.Request = request;
+
+                // Assert
+                Assert.Same(expectedRequestContext, request.GetRequestContext());
+            }
+        }
+
+        [Fact]
+        public void RequestSet_WithConfigurationPropertyAndDefaultRequestContext_UpdatesConfiguration()
+        {
+            // Arrange
+            using (HttpRequestMessage request = CreateRequest())
+            using (HttpConfiguration expectedConfiguration = new HttpConfiguration())
+            {
+                ApiController controller = CreateFakeController();
+                request.SetConfiguration(expectedConfiguration);
+                controller.Request = request;
+
+                // Act
+                HttpConfiguration configuration = controller.Configuration;
+
+                // Assert
+                Assert.Same(expectedConfiguration, configuration);
+            }
+        }
+
+        [Fact]
+        public void RequestContextSet_LeavesRequestRequestContextUnchanged_WhenRequestHasControllerRequestContext()
+        {
+            // Arrange
+            using (HttpRequestMessage request = CreateRequest())
+            {
+                ApiController controller = CreateFakeController();
+                HttpRequestContext expectedRequestContext = controller.RequestContext;
+                request.SetRequestContext(expectedRequestContext);
+
+                // Act
+                controller.Request = request;
+
+                // Assert
+                HttpRequestContext requestContext = request.GetRequestContext();
+                Assert.Same(expectedRequestContext, requestContext);
+            }
+        }
+
+        [Fact]
+        public void RequestSet_UpdatesRequestBackedContextRequest()
+        {
+            // Arrange
+            using (HttpRequestMessage expectedRequest = CreateRequest())
+            {
+                ApiController controller = CreateFakeController();
+                Assert.IsType<RequestBackedHttpRequestContext>(controller.RequestContext); // Guard
+                RequestBackedHttpRequestContext context = (RequestBackedHttpRequestContext)controller.RequestContext;
+
+                // Act
+                controller.Request = expectedRequest;
+
+                // Assert
+                Assert.Same(expectedRequest, context.Request);
+            }
+        }
+
+        [Fact]
+        public void RequestContextGet_ReturnsControllerContextRequestContext()
+        {
+            // Arrange
+            HttpControllerContext controllerContext = CreateControllerContext();
+            HttpRequestContext expectedRequestContext = CreateRequestContext();
+            controllerContext.RequestContext = expectedRequestContext;
+            ApiController controller = CreateFakeController();
+            controller.ControllerContext = controllerContext;
+
+            // Act
+            HttpRequestContext requestContext = controller.RequestContext;
+
+            // Assert
+            Assert.Same(expectedRequestContext, requestContext);
+        }
+
+        [Fact]
+        public void RequestContextSet_Throws_WhenNull()
+        {
+            // Arrange
+            ApiController controller = CreateFakeController();
+
+            // Act & Assert
+            Assert.ThrowsArgumentNull(() => { controller.RequestContext = null; }, "value");
+        }
+
+        [Fact]
+        public void RequestContextSet_UpdatesControllerContextRequestContext()
+        {
+            // Arrange
+            ApiController controller = CreateFakeController();
+            HttpControllerContext controllerContext = CreateControllerContext();
+            controller.ControllerContext = controllerContext;
+            HttpRequestContext expectedRequestContext = CreateRequestContext();
+
+            // Act
+            controller.RequestContext = expectedRequestContext;
+
+            // Assert
+            Assert.Same(expectedRequestContext, controllerContext.RequestContext);
+        }
+
+        [Fact]
+        public void RequestContextSet_UpdatesRequestRequestContext_WhenRequestIsPresent()
+        {
+            // Arrange
+            using (HttpRequestMessage request = CreateRequest())
+            {
+                ApiController controller = CreateFakeController();
+                HttpRequestContext expectedRequestContext = CreateRequestContext();
+                controller.Request = request;
+
+                // Act
+                controller.RequestContext = expectedRequestContext;
+
+                // Assert
+                HttpRequestContext requestContext = request.GetRequestContext();
+                Assert.Same(expectedRequestContext, requestContext);
+            }
+        }
+
+        [Fact]
+        public void RequestContextSet_Throws_WhenRequestIsPresentWithConflictingRequestContext()
+        {
+            // Arrange
+            using (HttpRequestMessage request = CreateRequest())
+            {
+                ApiController controller = CreateFakeController();
+                HttpRequestContext otherRequestContext = CreateRequestContext();
+                controller.Request = request;
+                request.SetRequestContext(otherRequestContext);
+                HttpRequestContext requestContext = CreateRequestContext();
+
+                // Act & Assert
+                Assert.Throws<InvalidOperationException>(() => { controller.RequestContext = requestContext; },
+                    "The request context property on the request must be null or match ApiController.RequestContext.");
+            }
+        }
+
+        [Fact]
+        public void RequestContextSet_UpdatesRequestRequestContext_WhenRequestIsPresentWithNoContext()
+        {
+            // Arrange
+            using (HttpRequestMessage request = CreateRequest())
+            {
+                ApiController controller = CreateFakeController();
+                HttpRequestContext expectedRequestContext = CreateRequestContext();
+                controller.Request = request;
+                request.Properties.Remove(HttpPropertyKeys.RequestContextKey);
+
+                // Act
+                controller.RequestContext = expectedRequestContext;
+
+                // Assert
+                HttpRequestContext requestContext = request.GetRequestContext();
+                Assert.Same(expectedRequestContext, requestContext);
+            }
+        }
+
+        [Fact]
+        public void RequestContextSet_UpdatesRequestRequestContext_WhenRequestIsPresentWithExistingContext()
+        {
+            // Arrange
+            using (HttpRequestMessage request = CreateRequest())
+            {
+                ApiController controller = CreateFakeController();
+                HttpRequestContext expectedRequestContext = CreateRequestContext();
+                controller.Request = request;
+                request.SetRequestContext(controller.RequestContext);
+
+                // Act
+                controller.RequestContext = expectedRequestContext;
+
+                // Assert
+                HttpRequestContext requestContext = request.GetRequestContext();
+                Assert.Same(expectedRequestContext, requestContext);
+            }
+        }
+
+        [Fact]
+        public void RequestContextSet_LeavesRequestRequestContextUnchanged_WhenRequestIsPresentWithNewContext()
+        {
+            // Arrange
+            using (HttpRequestMessage request = CreateRequest())
+            {
+                ApiController controller = CreateFakeController();
+                HttpRequestContext expectedRequestContext = CreateRequestContext();
+                controller.Request = request;
+                request.SetRequestContext(expectedRequestContext);
+
+                // Act
+                controller.RequestContext = expectedRequestContext;
+
+                // Assert
+                HttpRequestContext requestContext = request.GetRequestContext();
+                Assert.Same(expectedRequestContext, requestContext);
+            }
+        }
+
+        [Fact]
+        public void RequestContextDefault_IsRequestBacked()
+        {
+            // Arrange
+            ApiController controller = CreateFakeController();
+
+            // Act
+            HttpRequestContext context = controller.RequestContext;
+
+            // Assert
+            Assert.IsType<RequestBackedHttpRequestContext>(context);
+        }
+
+        [Fact]
+        public void UserGet_ReturnsContextPrincipal()
+        {
+            // Arrange
+            ApiController controller = CreateFakeController();
+            IPrincipal expectedPrincipal = CreateDummyPrincipal();
+            controller.RequestContext = new HttpRequestContext
+            {
+                Principal = expectedPrincipal
+            };
+
+            // Act
+            IPrincipal principal = controller.User;
+
+            // Assert
+            Assert.Same(expectedPrincipal, principal);
+        }
+
+        [Fact]
+        public void UserSet_UpdatesContextPrincipal()
+        {
+            // Arrange
+            ApiController controller = CreateFakeController();
+            IPrincipal expectedPrincipal = CreateDummyPrincipal();
+            HttpRequestContext context = new HttpRequestContext();
+            controller.RequestContext = context;
+
+            // Act
+            controller.User = expectedPrincipal;
+
+            // Assert
+            Assert.Same(expectedPrincipal, context.Principal);
+        }
+
+        [Fact]
+        public void Validate_ThrowsInvalidOperationException_IfConfigurationIsNull()
+        {
+            // Arrange
+            TestController controller = new TestController();
+            TestEntity entity = new TestEntity();
+
+            // Act & Assert
+            Assert.Throws<InvalidOperationException>(
+                () => controller.Validate(entity),
+                "ApiController.Configuration must not be null.");
+        }
+
+        [Fact]
+        public void Validate_DoesNothing_IfValidatorIsNull()
+        {
+            // Arrange
+            HttpConfiguration configuration = new HttpConfiguration();
+            configuration.Services.Replace(typeof(IBodyModelValidator), null);
+            TestEntity entity = new TestEntity { ID = 9999999 };
+
+            TestController controller = new TestController { Configuration = configuration };
+
+            // Act
+            controller.Validate(entity);
+
+            // Assert
+            Assert.True(controller.ModelState.IsValid);
+        }
+
+        [Fact]
+        [ReplaceCulture]
+        public void Validate_CallsValidateOnConfiguredValidator_UsingConfiguredMetadataProvider()
+        {
+            // Arrange
+            Mock<IBodyModelValidator> validator = new Mock<IBodyModelValidator>();
+            Mock<ModelMetadataProvider> metadataProvider = new Mock<ModelMetadataProvider>();
+
+            HttpConfiguration configuration = new HttpConfiguration();
+            configuration.Services.Replace(typeof(IBodyModelValidator), validator.Object);
+            configuration.Services.Replace(typeof(ModelMetadataProvider), metadataProvider.Object);
+
+            TestController controller = new TestController { Configuration = configuration };
+            TestEntity entity = new TestEntity { ID = 42 };
+
+            // Act
+            controller.Validate(entity);
+
+            // Assert
+            validator.Verify(
+                v => v.Validate(entity, typeof(TestEntity), metadataProvider.Object, controller.ActionContext, String.Empty),
+                Times.Once());
+            Assert.True(controller.ModelState.IsValid);
+        }
+
+        [Fact]
+        [ReplaceCulture]
+        public void Validate_SetsModelStateErrors_ForInvalidModels()
+        {
+            // Arrange
+            HttpConfiguration configuration = new HttpConfiguration();
+            TestController controller = new TestController { Configuration = configuration };
+            TestEntity entity = new TestEntity { ID = -1 };
+
+            // Act
+            controller.Validate(entity);
+
+            // Assert
+            Assert.False(controller.ModelState.IsValid);
+            Assert.Equal("The field ID must be between 0 and 100.", controller.ModelState["ID"].Errors[0].ErrorMessage);
+        }
+
+        [Fact]
+        [ReplaceCulture]
+        public void Validate_SetsModelStateErrorsUnderRightPrefix_ForInvalidModels()
+        {
+            // Arrange
+            HttpConfiguration configuration = new HttpConfiguration();
+            TestController controller = new TestController { Configuration = configuration };
+            TestEntity entity = new TestEntity { ID = -1 };
+
+            // Act
+            controller.Validate(entity, keyPrefix: "prefix");
+
+            // Assert
+            Assert.False(controller.ModelState.IsValid);
+            Assert.Equal("The field ID must be between 0 and 100.",
+                controller.ModelState["prefix.ID"].Errors[0].ErrorMessage);
+        }
+
+        [Fact]
+        public void Validate_DoesNotThrow_ForValidModels()
+        {
+            // Arrange
+            HttpConfiguration configuration = new HttpConfiguration();
+            TestController controller = new TestController { Configuration = configuration };
+            TestEntity entity = new TestEntity { ID = 42 };
+
+            // Act && Assert
+            Assert.DoesNotThrow(() => controller.Validate(entity));
+        }
+
+        private class TestController : ApiController
+        {
+        }
+
+        private class TestEntity
+        {
+            [Range(0, 100)]
+            public int ID { get; set; }
+        }
+
         private Mock<IAuthorizationFilter> CreateAuthorizationFilterMock(Func<HttpActionContext, CancellationToken, Func<Task<HttpResponseMessage>>, Task<HttpResponseMessage>> implementation)
         {
             Mock<IAuthorizationFilter> filterMock = new Mock<IAuthorizationFilter>();
@@ -731,14 +1203,39 @@ namespace System.Web.Http
             return filterMock;
         }
 
-        private Mock<IExceptionFilter> CreateExceptionFilterMock(Func<HttpActionExecutedContext, CancellationToken, Task> implementation)
+        private static HttpControllerContext CreateControllerContext()
         {
-            Mock<IExceptionFilter> filterMock = new Mock<IExceptionFilter>();
-            filterMock.Setup(f => f.ExecuteExceptionFilterAsync(It.IsAny<HttpActionExecutedContext>(),
-                                                                CancellationToken.None))
-                      .Returns(implementation)
-                      .Verifiable();
-            return filterMock;
+            return new HttpControllerContext();
+        }
+
+        private static IPrincipal CreateDummyPrincipal()
+        {
+            return new Mock<IPrincipal>(MockBehavior.Strict).Object;
+        }
+
+        private static ApiController CreateFakeController()
+        {
+            return new ExceptionlessController();
+        }
+
+        private static HttpRequestMessage CreateRequest()
+        {
+            return new HttpRequestMessage();
+        }
+
+        private static HttpRequestContext CreateRequestContext()
+        {
+            return new HttpRequestContext();
+        }
+
+        private static IExceptionFilter CreateStubExceptionFilter()
+        {
+            Mock<IExceptionFilter> mock = new Mock<IExceptionFilter>(MockBehavior.Strict);
+            mock
+                .Setup(f => f.ExecuteExceptionFilterAsync(It.IsAny<HttpActionExecutedContext>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns(Task.FromResult(0));
+            return mock.Object;
         }
 
         private static Mock<DefaultServices> BuildFilterProvidingServicesMock(HttpConfiguration configuration, HttpActionDescriptor action, params FilterInfo[] filters)
@@ -748,6 +1245,45 @@ namespace System.Web.Http
             servicesMock.Setup(r => r.GetServices(typeof(IFilterProvider))).Returns(new[] { filterProviderMock.Object });
             filterProviderMock.Setup(fp => fp.GetFilters(configuration, action)).Returns(filters);
             return servicesMock;
+        }
+
+        public class ExceptionController : ApiController
+        {
+            private readonly Exception _exception;
+
+            public ExceptionController(Exception exception)
+            {
+                _exception = exception;
+            }
+
+            public void Get()
+            {
+                throw _exception;
+            }
+        }
+
+        public class ExceptionlessController : ApiController
+        {
+            public void Get()
+            {
+            }
+        }
+
+        public class SpyDisposeController : ApiController
+        {
+            public static bool DisposeWasCalled = false;
+
+            public SpyDisposeController()
+            {
+            }
+
+            public void Get() { }
+
+            protected override void Dispose(bool disposing)
+            {
+                DisposeWasCalled = true;
+                base.Dispose(disposing);
+            }
         }
 
         /// <summary>
@@ -770,23 +1306,6 @@ namespace System.Web.Http
             {
                 get { return false; }
             }
-        }
-    }
-
-    public class SpyDisposeController : System.Web.Http.ApiController
-    {
-        public static bool DisposeWasCalled = false;
-
-        public SpyDisposeController()
-        {
-        }
-
-        public void Get() { }
-
-        protected override void Dispose(bool disposing)
-        {
-            DisposeWasCalled = true;
-            base.Dispose(disposing);
         }
     }
 }

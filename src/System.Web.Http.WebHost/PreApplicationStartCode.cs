@@ -5,6 +5,7 @@ using System.ComponentModel;
 namespace System.Web.Http.WebHost
 {
     [EditorBrowsable(EditorBrowsableState.Never)]
+    [Obsolete("Use of this type is not recommended because it no longer has initialization logic.")]
     public static class PreApplicationStartCode
     {
         private static bool _startWasCalled;
@@ -18,7 +19,7 @@ namespace System.Web.Http.WebHost
             }
             _startWasCalled = true;
 
-            SuppressFormsAuthRedirectModule.Register();
+            // We need to keep this for App-Compat reasons. Prior to 4.5 we registered a module here.
         }
     }
 }

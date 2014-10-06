@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Web.Http.Controllers;
 using System.Web.Http.Filters;
+using System.Web.Http.Services;
 using Microsoft.TestCommon;
 using Moq;
 
@@ -19,12 +20,12 @@ namespace System.Web.Http.Tracing.Tracers
             // Arrange
             HttpResponseMessage response = new HttpResponseMessage();
             Mock<IAuthorizationFilter> mockFilter = new Mock<IAuthorizationFilter>() { CallBase = true };
-            mockFilter.Setup(f => f.ExecuteAuthorizationFilterAsync(It.IsAny<HttpActionContext>(), It.IsAny<CancellationToken>(), It.IsAny<Func<Task<HttpResponseMessage>>>())).Returns(TaskHelpers.FromResult(response));
+            mockFilter.Setup(f => f.ExecuteAuthorizationFilterAsync(It.IsAny<HttpActionContext>(), It.IsAny<CancellationToken>(), It.IsAny<Func<Task<HttpResponseMessage>>>())).Returns(Task.FromResult(response));
             Mock<HttpActionDescriptor> mockActionDescriptor = new Mock<HttpActionDescriptor>() { CallBase = true };
             mockActionDescriptor.Setup(a => a.ActionName).Returns("test");
             mockActionDescriptor.Setup(a => a.GetParameters()).Returns(new Collection<HttpParameterDescriptor>(new HttpParameterDescriptor[0]));
             HttpActionContext actionContext = ContextUtil.CreateActionContext(actionDescriptor: mockActionDescriptor.Object);
-            Func<Task<HttpResponseMessage>> continuation = () => TaskHelpers.FromResult<HttpResponseMessage>(new HttpResponseMessage());
+            Func<Task<HttpResponseMessage>> continuation = () => Task.FromResult<HttpResponseMessage>(new HttpResponseMessage());
             TestTraceWriter traceWriter = new TestTraceWriter();
             AuthorizationFilterTracer tracer = new AuthorizationFilterTracer(mockFilter.Object, traceWriter);
             TraceRecord[] expectedTraces = new TraceRecord[]
@@ -55,7 +56,7 @@ namespace System.Web.Http.Tracing.Tracers
             mockActionDescriptor.Setup(a => a.ActionName).Returns("test");
             mockActionDescriptor.Setup(a => a.GetParameters()).Returns(new Collection<HttpParameterDescriptor>(new HttpParameterDescriptor[0]));
             HttpActionContext actionContext = ContextUtil.CreateActionContext(actionDescriptor: mockActionDescriptor.Object);
-            Func<Task<HttpResponseMessage>> continuation = () => TaskHelpers.FromResult<HttpResponseMessage>(response);
+            Func<Task<HttpResponseMessage>> continuation = () => Task.FromResult<HttpResponseMessage>(response);
             TestTraceWriter traceWriter = new TestTraceWriter();
             AuthorizationFilterTracer tracer = new AuthorizationFilterTracer(mockAttr.Object, traceWriter);
             TraceRecord[] expectedTraces = new TraceRecord[]
@@ -72,6 +73,34 @@ namespace System.Web.Http.Tracing.Tracers
             Assert.Same(exception, thrown);
             Assert.Same(exception, traceWriter.Traces[1].Exception);
             Assert.Equal<TraceRecord>(expectedTraces, traceWriter.Traces, new TraceRecordComparer());
+        }
+
+        [Fact]
+        public void Inner_Property_On_AuthorizationFilterTracer_Returns_IAuthorizationFilter()
+        {
+            // Arrange
+            IAuthorizationFilter expectedInner = new Mock<IAuthorizationFilter>().Object;
+            AuthorizationFilterTracer productUnderTest = new AuthorizationFilterTracer(expectedInner, new TestTraceWriter());
+
+            // Act
+            IAuthorizationFilter actualInner = productUnderTest.Inner as IAuthorizationFilter;
+
+            // Assert
+            Assert.Same(expectedInner, actualInner);
+        }
+
+        [Fact]
+        public void Decorator_GetInner_On_AuthorizationFilterTracer_Returns_IAuthorizationFilter()
+        {
+            // Arrange
+            IAuthorizationFilter expectedInner = new Mock<IAuthorizationFilter>().Object;
+            AuthorizationFilterTracer productUnderTest = new AuthorizationFilterTracer(expectedInner, new TestTraceWriter());
+
+            // Act
+            IAuthorizationFilter actualInner = Decorator.GetInner(productUnderTest as IAuthorizationFilter);
+
+            // Assert
+            Assert.Same(expectedInner, actualInner);
         }
     }
 }

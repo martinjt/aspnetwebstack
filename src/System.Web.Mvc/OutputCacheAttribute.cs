@@ -158,7 +158,7 @@ namespace System.Web.Mvc
             // The key is typically too long to be useful, so we use a cryptographic hash
             // as the actual key (better randomization and key distribution, so small vary
             // values will generate dramtically different keys).
-            using (SHA256 sha = SHA256.Create())
+            using (SHA256Cng sha = new SHA256Cng())
             {
                 return Convert.ToBase64String(sha.ComputeHash(Encoding.UTF8.GetBytes(uniqueIdBuilder.ToString())));
             }
@@ -202,6 +202,14 @@ namespace System.Web.Mvc
 
             if (filterContext.IsChildAction)
             {
+                // Skip validation and caching if there's no caching on the server for this action. It's ok to 
+                // explicitly disable caching for a child action, but it will be ignored if the parent action
+                // is using caching.
+                if (IsServerSideCacheDisabled())
+                {
+                    return;
+                }
+
                 ValidateChildActionConfiguration();
 
                 // Already actively being captured? (i.e., cached child action inside of cached child action)
@@ -314,6 +322,15 @@ namespace System.Web.Mvc
 
         private void ValidateChildActionConfiguration()
         {
+            if (!String.IsNullOrWhiteSpace(CacheProfile) ||
+                !String.IsNullOrWhiteSpace(SqlDependency) ||
+                !String.IsNullOrWhiteSpace(VaryByContentEncoding) ||
+                !String.IsNullOrWhiteSpace(VaryByHeader) ||
+                _locationWasSet || _noStoreWasSet)
+            {
+                throw new InvalidOperationException(MvcResources.OutputCacheAttribute_ChildAction_UnsupportedSetting);
+            }
+
             if (Duration <= 0)
             {
                 throw new InvalidOperationException(MvcResources.OutputCacheAttribute_InvalidDuration);
@@ -323,14 +340,19 @@ namespace System.Web.Mvc
             {
                 throw new InvalidOperationException(MvcResources.OutputCacheAttribute_InvalidVaryByParam);
             }
+        }
 
-            if (!String.IsNullOrWhiteSpace(CacheProfile) ||
-                !String.IsNullOrWhiteSpace(SqlDependency) ||
-                !String.IsNullOrWhiteSpace(VaryByContentEncoding) ||
-                !String.IsNullOrWhiteSpace(VaryByHeader) ||
-                _locationWasSet || _noStoreWasSet)
+        private bool IsServerSideCacheDisabled()
+        {
+            switch (Location)
             {
-                throw new InvalidOperationException(MvcResources.OutputCacheAttribute_ChildAction_UnsupportedSetting);
+                case OutputCacheLocation.None:
+                case OutputCacheLocation.Client:
+                case OutputCacheLocation.Downstream:
+                    return true;
+
+                default: 
+                    return false;
             }
         }
 

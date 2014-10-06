@@ -83,7 +83,7 @@ namespace System.Web.WebPages
 
         public virtual string Href(string path, params object[] pathParts)
         {
-            return UrlUtil.Url(VirtualPath, path, pathParts);
+            return UrlUtil.GenerateClientUrl(Context, VirtualPath, path, pathParts);
         }
 
         protected internal void BeginContext(int startPosition, int length, bool isLiteral)
@@ -152,7 +152,7 @@ namespace System.Web.WebPages
         /// <summary>
         /// Normalizes path relative to the current virtual path and throws if a file does not exist at the location.
         /// </summary>
-        internal string NormalizeLayoutPagePath(string layoutPagePath)
+        protected internal virtual string NormalizeLayoutPagePath(string layoutPagePath)
         {
             var virtualPath = NormalizePath(layoutPagePath);
             // Look for it as specified, either absolute, relative or same folder
@@ -205,50 +205,73 @@ namespace System.Web.WebPages
                         suffix : // End of the list, grab the suffix
                         values[i + 1].Prefix; // Still in the list, grab the next prefix
 
-                    bool? boolVal = null;
+                    if (val.Value == null)
+                    {
+                        // Nothing to write
+                        continue;
+                    }
+
+                    // The special cases here are that the value we're writing might already be a string, or that the 
+                    // value might be a bool. If the value is the bool 'true' we want to write the attribute name instead
+                    // of the string 'true'. If the value is the bool 'false' we don't want to write anything.
+                    //
+                    // Otherwise the value is another object (perhaps an IHtmlString), and we'll ask it to format itself.
+                    string stringValue;
+
+                    // Intentionally using is+cast here for performance reasons. This is more performant than as+bool? 
+                    // because of boxing.
                     if (val.Value is bool)
                     {
-                        boolVal = (bool)val.Value;
+                        if ((bool)val.Value)
+                        {
+                            stringValue = name;
+                        }
+                        else
+                        {
+                            continue;
+                        }
                     }
-
-                    if (val.Value != null && (boolVal == null || boolVal.Value))
+                    else
                     {
-                        string valStr = val.Value as string;
-                        if (valStr == null)
-                        {
-                            valStr = val.Value.ToString();
-                        }
-                        if (boolVal != null)
-                        {
-                            Debug.Assert(boolVal.Value);
-                            valStr = name;
-                        }
-
-                        if (first)
-                        {
-                            WritePositionTaggedLiteral(writer, pageVirtualPath, prefix);
-                            first = false;
-                        }
-                        else
-                        {
-                            WritePositionTaggedLiteral(writer, pageVirtualPath, attrVal.Prefix);
-                        }
-                        
-                        // Calculate length of the source span by the position of the next value (or suffix)
-                        int sourceLength = next.Position - attrVal.Value.Position;
-
-                        BeginContext(writer, pageVirtualPath, attrVal.Value.Position, sourceLength, isLiteral: attrVal.Literal);
-                        if (attrVal.Literal)
-                        {
-                            WriteLiteralTo(writer, valStr);
-                        }
-                        else
-                        {
-                            WriteTo(writer, valStr); // Write value
-                        }
-                        EndContext(writer, pageVirtualPath, attrVal.Value.Position, sourceLength, isLiteral: attrVal.Literal);
-                        wroteSomething = true;
+                        stringValue = val.Value as string;
                     }
+
+                    if (first)
+                    {
+                        WritePositionTaggedLiteral(writer, pageVirtualPath, prefix);
+                        first = false;
+                    }
+                    else
+                    {
+                        WritePositionTaggedLiteral(writer, pageVirtualPath, attrVal.Prefix);
+                    }
+
+                    // Calculate length of the source span by the position of the next value (or suffix)
+                    int sourceLength = next.Position - attrVal.Value.Position;
+
+                    BeginContext(writer, pageVirtualPath, attrVal.Value.Position, sourceLength, isLiteral: attrVal.Literal);
+
+                    // The extra branching here is to ensure that we call the Write*To(string) overload when
+                    // possible.
+                    if (attrVal.Literal && stringValue != null)
+                    {
+                        WriteLiteralTo(writer, stringValue);
+                    }
+                    else if (attrVal.Literal)
+                    {
+                        WriteLiteralTo(writer, val.Value);
+                    }
+                    else if (stringValue != null)
+                    {
+                        WriteTo(writer, stringValue);
+                    }
+                    else
+                    {
+                        WriteTo(writer, val.Value);
+                    }
+
+                    EndContext(writer, pageVirtualPath, attrVal.Value.Position, sourceLength, isLiteral: attrVal.Literal);
+                    wroteSomething = true;
                 }
                 if (wroteSomething)
                 {
@@ -284,8 +307,20 @@ namespace System.Web.WebPages
             writer.Write(HttpUtility.HtmlEncode(content));
         }
 
+        // Perf optimization to avoid calling string.ToString when we already know the type is a string.
+        private static void WriteTo(TextWriter writer, string content)
+        {
+            writer.Write(HttpUtility.HtmlEncode(content));
+        }
+
         // This method is called by generated code and needs to stay in sync with the parser
         public static void WriteLiteralTo(TextWriter writer, object content)
+        {
+            writer.Write(content);
+        }
+
+        // Perf optimization to avoid calling string.ToString when we already know the type is a string.
+        private static void WriteLiteralTo(TextWriter writer, string content)
         {
             writer.Write(content);
         }

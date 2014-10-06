@@ -7,7 +7,9 @@ using System.Web.Http.Controllers;
 using System.Web.Http.Dependencies;
 using System.Web.Http.Description;
 using System.Web.Http.Dispatcher;
+using System.Web.Http.ExceptionHandling;
 using System.Web.Http.Filters;
+using System.Web.Http.Hosting;
 using System.Web.Http.Metadata;
 using System.Web.Http.Metadata.Providers;
 using System.Web.Http.ModelBinding;
@@ -59,6 +61,7 @@ namespace System.Web.Http.Services
             Assert.IsType<TraceManager>(defaultServices.GetService(typeof(ITraceManager)));
             Assert.IsType<DataAnnotationsModelMetadataProvider>(defaultServices.GetService(typeof(ModelMetadataProvider)));
             Assert.IsType<ModelValidatorCache>(defaultServices.GetService(typeof(IModelValidatorCache)));
+            Assert.IsType<DefaultExceptionHandler>(defaultServices.GetService(typeof(IExceptionHandler)));
 
             object[] filterProviders = defaultServices.GetServices(typeof(IFilterProvider)).ToArray();
             Assert.Equal(2, filterProviders.Length);
@@ -77,15 +80,17 @@ namespace System.Web.Http.Services
             Assert.IsType<MutableObjectModelBinderProvider>(modelBinderProviders[7]);
 
             object[] validatorProviders = defaultServices.GetServices(typeof(ModelValidatorProvider)).ToArray();
-            Assert.Equal(3, validatorProviders.Length);
+            Assert.Equal(2, validatorProviders.Length);
             Assert.IsType<DataAnnotationsModelValidatorProvider>(validatorProviders[0]);
             Assert.IsType<DataMemberModelValidatorProvider>(validatorProviders[1]);
-            Assert.IsType<InvalidModelValidatorProvider>(validatorProviders[2]);
 
             object[] valueProviderFactories = defaultServices.GetServices(typeof(ValueProviderFactory)).ToArray();
             Assert.Equal(2, valueProviderFactories.Length);
             Assert.IsType<QueryStringValueProviderFactory>(valueProviderFactories[0]);
             Assert.IsType<RouteDataValueProviderFactory>(valueProviderFactories[1]);
+
+            object[] exceptionLoggers = defaultServices.GetServices(typeof(IExceptionLogger)).ToArray();
+            Assert.Equal(0, exceptionLoggers.Length);
         }
 
         // Add tests

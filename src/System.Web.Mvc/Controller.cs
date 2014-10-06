@@ -1,19 +1,23 @@
 ﻿// Copyright (c) Microsoft Open Technologies, Inc. All rights reserved. See License.txt in the project root for license information.
 
 using System.Diagnostics.CodeAnalysis;
+using System.Diagnostics.Contracts;
 using System.Globalization;
 using System.IO;
 using System.Security.Principal;
 using System.Text;
 using System.Web.Mvc.Async;
+using System.Web.Mvc.Filters;
 using System.Web.Mvc.Properties;
+using System.Web.Mvc.Routing;
 using System.Web.Profile;
 using System.Web.Routing;
+using System.Web.WebPages;
 
 namespace System.Web.Mvc
 {
     [SuppressMessage("Microsoft.Maintainability", "CA1506:AvoidExcessiveClassCoupling", Justification = "Class complexity dictated by public surface area")]
-    public abstract class Controller : ControllerBase, IActionFilter, IAuthorizationFilter, IDisposable, IExceptionFilter, IResultFilter, IAsyncController, IAsyncManagerContainer
+    public abstract class Controller : ControllerBase, IActionFilter, IAuthenticationFilter, IAuthorizationFilter, IDisposable, IExceptionFilter, IResultFilter, IAsyncController, IAsyncManagerContainer
     {
         private static readonly object _executeTag = new object();
         private static readonly object _executeCoreTag = new object();
@@ -27,9 +31,11 @@ namespace System.Web.Mvc
 
         private IDependencyResolver _resolver;
 
-        // By default, use the global resolver with caching. 
-        // Or we can override to supply this instance with its own cache.
-        internal IDependencyResolver Resolver
+        /// <summary>
+        /// Represents a replaceable dependency resolver providing services.
+        /// By default, it uses the <see cref="DependencyResolver.CurrentCache"/>. 
+        /// </summary>
+        public IDependencyResolver Resolver
         {
             get { return _resolver ?? DependencyResolver.CurrentCache; }
             set { _resolver = value; }
@@ -183,11 +189,34 @@ namespace System.Web.Mvc
         protected virtual IActionInvoker CreateActionInvoker()
         {
             // Controller supports asynchronous operations by default. 
-            return Resolver.GetService<IAsyncActionInvoker>() ?? Resolver.GetService<IActionInvoker>() ?? new AsyncControllerActionInvoker();
+            // Those factories can be customized in order to create an action invoker for each request.
+            IAsyncActionInvokerFactory asyncActionInvokerFactory = Resolver.GetService<IAsyncActionInvokerFactory>();
+            if (asyncActionInvokerFactory != null)
+            {
+                return asyncActionInvokerFactory.CreateInstance();
+            }
+            IActionInvokerFactory actionInvokerFactory = Resolver.GetService<IActionInvokerFactory>();
+            if (actionInvokerFactory != null)
+            {
+                return actionInvokerFactory.CreateInstance();
+            }
+
+            // Note that getting a service from the current cache will return the same instance for every request.
+            return Resolver.GetService<IAsyncActionInvoker>() ??
+                Resolver.GetService<IActionInvoker>() ??
+                new AsyncControllerActionInvoker();
         }
 
         protected virtual ITempDataProvider CreateTempDataProvider()
         {
+            // The factory can be customized in order to create an ITempDataProvider for the controller.
+            ITempDataProviderFactory tempDataProviderFactory = Resolver.GetService<ITempDataProviderFactory>();
+            if (tempDataProviderFactory != null)
+            {
+                return tempDataProviderFactory.CreateInstance();
+            }
+
+            // Note that getting a service from the current cache will return the same instance for every controller.
             return Resolver.GetService<ITempDataProvider>() ?? new SessionStateTempDataProvider();
         }
 
@@ -213,7 +242,7 @@ namespace System.Web.Mvc
             PossiblyLoadTempData();
             try
             {
-                string actionName = RouteData.GetRequiredString("action");
+                string actionName = GetActionName(RouteData);
                 if (!ActionInvoker.InvokeAction(ControllerContext, actionName))
                 {
                     HandleUnknownAction(actionName);
@@ -255,10 +284,36 @@ namespace System.Web.Mvc
             return new FilePathResult(fileName, contentType) { FileDownloadName = fileDownloadName };
         }
 
+        private static string GetActionName(RouteData routeData)
+        {
+            Contract.Assert(routeData != null);
+
+            // If this is an attribute routing match then the 'RouteData' has a list of sub-matches rather than
+            // the traditional controller and action values. When the match is an attribute routing match
+            // we'll pass null to the action selector, and let it choose a sub-match to use.
+            if (routeData.HasDirectRouteMatch())
+            {
+                return null;
+            }
+            else
+            {
+                return routeData.GetRequiredString("action");
+            }
+        }
+
         protected virtual void HandleUnknownAction(string actionName)
         {
-            throw new HttpException(404, String.Format(CultureInfo.CurrentCulture,
-                                                       MvcResources.Controller_UnknownAction, actionName, GetType().FullName));
+            // If this is a direct route we might not yet have an action name
+            if (String.IsNullOrEmpty(actionName))
+            {
+                throw new HttpException(404, String.Format(CultureInfo.CurrentCulture,
+                                           MvcResources.Controller_UnknownAction_NoActionName, GetType().FullName));
+            }
+            else
+            {
+                throw new HttpException(404, String.Format(CultureInfo.CurrentCulture,
+                                                           MvcResources.Controller_UnknownAction, actionName, GetType().FullName));
+            }
         }
 
         protected internal HttpNotFoundResult HttpNotFound()
@@ -323,6 +378,14 @@ namespace System.Web.Mvc
         }
 
         protected virtual void OnActionExecuted(ActionExecutedContext filterContext)
+        {
+        }
+
+        protected virtual void OnAuthentication(AuthenticationContext filterContext)
+        {
+        }
+
+        protected virtual void OnAuthenticationChallenge(AuthenticationChallengeContext filterContext)
         {
         }
 
@@ -418,7 +481,7 @@ namespace System.Web.Mvc
 
         protected internal RedirectToRouteResult RedirectToAction(string actionName, object routeValues)
         {
-            return RedirectToAction(actionName, new RouteValueDictionary(routeValues));
+            return RedirectToAction(actionName, TypeHelper.ObjectToDictionary(routeValues));
         }
 
         protected internal RedirectToRouteResult RedirectToAction(string actionName, RouteValueDictionary routeValues)
@@ -433,7 +496,7 @@ namespace System.Web.Mvc
 
         protected internal RedirectToRouteResult RedirectToAction(string actionName, string controllerName, object routeValues)
         {
-            return RedirectToAction(actionName, controllerName, new RouteValueDictionary(routeValues));
+            return RedirectToAction(actionName, controllerName, TypeHelper.ObjectToDictionary(routeValues));
         }
 
         protected internal virtual RedirectToRouteResult RedirectToAction(string actionName, string controllerName, RouteValueDictionary routeValues)
@@ -459,7 +522,7 @@ namespace System.Web.Mvc
 
         protected internal RedirectToRouteResult RedirectToActionPermanent(string actionName, object routeValues)
         {
-            return RedirectToActionPermanent(actionName, new RouteValueDictionary(routeValues));
+            return RedirectToActionPermanent(actionName, TypeHelper.ObjectToDictionary(routeValues));
         }
 
         protected internal RedirectToRouteResult RedirectToActionPermanent(string actionName, RouteValueDictionary routeValues)
@@ -474,7 +537,7 @@ namespace System.Web.Mvc
 
         protected internal RedirectToRouteResult RedirectToActionPermanent(string actionName, string controllerName, object routeValues)
         {
-            return RedirectToActionPermanent(actionName, controllerName, new RouteValueDictionary(routeValues));
+            return RedirectToActionPermanent(actionName, controllerName, TypeHelper.ObjectToDictionary(routeValues));
         }
 
         protected internal virtual RedirectToRouteResult RedirectToActionPermanent(string actionName, string controllerName, RouteValueDictionary routeValues)
@@ -489,7 +552,7 @@ namespace System.Web.Mvc
 
         protected internal RedirectToRouteResult RedirectToRoute(object routeValues)
         {
-            return RedirectToRoute(new RouteValueDictionary(routeValues));
+            return RedirectToRoute(TypeHelper.ObjectToDictionary(routeValues));
         }
 
         protected internal RedirectToRouteResult RedirectToRoute(RouteValueDictionary routeValues)
@@ -504,7 +567,7 @@ namespace System.Web.Mvc
 
         protected internal RedirectToRouteResult RedirectToRoute(string routeName, object routeValues)
         {
-            return RedirectToRoute(routeName, new RouteValueDictionary(routeValues));
+            return RedirectToRoute(routeName, TypeHelper.ObjectToDictionary(routeValues));
         }
 
         protected internal virtual RedirectToRouteResult RedirectToRoute(string routeName, RouteValueDictionary routeValues)
@@ -514,7 +577,7 @@ namespace System.Web.Mvc
 
         protected internal RedirectToRouteResult RedirectToRoutePermanent(object routeValues)
         {
-            return RedirectToRoutePermanent(new RouteValueDictionary(routeValues));
+            return RedirectToRoutePermanent(TypeHelper.ObjectToDictionary(routeValues));
         }
 
         protected internal RedirectToRouteResult RedirectToRoutePermanent(RouteValueDictionary routeValues)
@@ -529,7 +592,7 @@ namespace System.Web.Mvc
 
         protected internal RedirectToRouteResult RedirectToRoutePermanent(string routeName, object routeValues)
         {
-            return RedirectToRoutePermanent(routeName, new RouteValueDictionary(routeValues));
+            return RedirectToRoutePermanent(routeName, TypeHelper.ObjectToDictionary(routeValues));
         }
 
         protected internal virtual RedirectToRouteResult RedirectToRoutePermanent(string routeName, RouteValueDictionary routeValues)
@@ -801,7 +864,17 @@ namespace System.Web.Mvc
 
                 VerifyExecuteCalledOnce();
                 Initialize(requestContext);
-                return AsyncResultWrapper.Begin(callback, state, BeginExecuteCore, EndExecuteCore, _executeTag);
+
+                // Ensure delegates continue to use the C# Compiler static delegate caching optimization.
+                BeginInvokeDelegate<Controller> beginDelegate = (AsyncCallback asyncCallback, object callbackState, Controller controller) =>
+                    {
+                        return controller.BeginExecuteCore(asyncCallback, callbackState);
+                    };
+                EndInvokeVoidDelegate<Controller> endDelegate = (IAsyncResult asyncResult, Controller controller) =>
+                    {
+                        controller.EndExecuteCore(asyncResult);
+                    };
+                return AsyncResultWrapper.Begin(callback, state, beginDelegate, endDelegate, this, _executeTag);
             }
         }
 
@@ -812,26 +885,28 @@ namespace System.Web.Mvc
             PossiblyLoadTempData();
             try
             {
-                string actionName = RouteData.GetRequiredString("action");
+                string actionName = GetActionName(RouteData);
                 IActionInvoker invoker = ActionInvoker;
                 IAsyncActionInvoker asyncInvoker = invoker as IAsyncActionInvoker;
                 if (asyncInvoker != null)
                 {
                     // asynchronous invocation
-                    BeginInvokeDelegate beginDelegate = delegate(AsyncCallback asyncCallback, object asyncState)
+                    // Ensure delegates continue to use the C# Compiler static delegate caching optimization.
+                    BeginInvokeDelegate<ExecuteCoreState> beginDelegate = delegate(AsyncCallback asyncCallback, object asyncState, ExecuteCoreState innerState)
                     {
-                        return asyncInvoker.BeginInvokeAction(ControllerContext, actionName, asyncCallback, asyncState);
+                        return innerState.AsyncInvoker.BeginInvokeAction(innerState.Controller.ControllerContext, innerState.ActionName, asyncCallback, asyncState);
                     };
 
-                    EndInvokeDelegate endDelegate = delegate(IAsyncResult asyncResult)
+                    EndInvokeVoidDelegate<ExecuteCoreState> endDelegate = delegate(IAsyncResult asyncResult, ExecuteCoreState innerState)
                     {
-                        if (!asyncInvoker.EndInvokeAction(asyncResult))
+                        if (!innerState.AsyncInvoker.EndInvokeAction(asyncResult))
                         {
-                            HandleUnknownAction(actionName);
+                            innerState.Controller.HandleUnknownAction(innerState.ActionName);
                         }
                     };
+                    ExecuteCoreState executeState = new ExecuteCoreState() { Controller = this, AsyncInvoker = asyncInvoker, ActionName = actionName };
 
-                    return AsyncResultWrapper.Begin(callback, state, beginDelegate, endDelegate, _executeCoreTag);
+                    return AsyncResultWrapper.Begin(callback, state, beginDelegate, endDelegate, executeState, _executeCoreTag);
                 }
                 else
                 {
@@ -887,6 +962,20 @@ namespace System.Web.Mvc
 
         #endregion
 
+        #region IAuthenticationFilter Members
+
+        void IAuthenticationFilter.OnAuthentication(AuthenticationContext filterContext)
+        {
+            OnAuthentication(filterContext);
+        }
+
+        void IAuthenticationFilter.OnAuthenticationChallenge(AuthenticationChallengeContext filterContext)
+        {
+            OnAuthenticationChallenge(filterContext);
+        }
+
+        #endregion
+
         #region IAuthorizationFilter Members
 
         void IAuthorizationFilter.OnAuthorization(AuthorizationContext filterContext)
@@ -918,5 +1007,13 @@ namespace System.Web.Mvc
         }
 
         #endregion
+
+        // Keep as value type to avoid allocating
+        private struct ExecuteCoreState
+        {
+            internal IAsyncActionInvoker AsyncInvoker;
+            internal Controller Controller;
+            internal string ActionName;
+        }
     }
 }

@@ -2,9 +2,10 @@
 
 using System.Collections;
 using System.Collections.Generic;
-using System.Linq;
+using System.Globalization;
 using System.Reflection;
 using System.Threading;
+using System.Web.Mvc.Properties;
 
 namespace System.Web.Mvc
 {
@@ -102,8 +103,12 @@ namespace System.Web.Mvc
 
         public static Type ExtractGenericInterface(Type queryType, Type interfaceType)
         {
-            Func<Type, bool> matchesInterface = t => t.IsGenericType && t.GetGenericTypeDefinition() == interfaceType;
-            return (matchesInterface(queryType)) ? queryType : queryType.GetInterfaces().FirstOrDefault(matchesInterface);
+            if (MatchesGenericType(queryType, interfaceType))
+            {
+                return queryType;
+            }
+            Type[] queryTypeInterfaces = queryType.GetInterfaces();
+            return MatchGenericTypeFirstOrDefault(queryTypeInterfaces, interfaceType);
         }
 
         public static object GetDefaultValue(Type type)
@@ -119,6 +124,48 @@ namespace System.Web.Mvc
         public static bool IsNullableValueType(Type type)
         {
             return Nullable.GetUnderlyingType(type) != null;
+        }
+
+        /// <summary>
+        /// Provide a new <see cref="MissingMethodException"/> if original Message does not contain given full Type name.
+        /// </summary>
+        /// <param name="originalException"><see cref="MissingMethodException"/> to check.</param>
+        /// <param name="fullTypeName">Full Type name which Message should contain.</param>
+        /// <returns>New <see cref="MissingMethodException"/> if an update is required; null otherwise.</returns>
+        public static MissingMethodException EnsureDebuggableException(
+            MissingMethodException originalException,
+            string fullTypeName)
+        {
+            MissingMethodException replacementException = null;
+            if (!originalException.Message.Contains(fullTypeName))
+            {
+                string message = String.Format(
+                    CultureInfo.CurrentCulture,
+                    MvcResources.TypeHelpers_CannotCreateInstance,
+                    originalException.Message,
+                    fullTypeName);
+                replacementException = new MissingMethodException(message, originalException);
+            }
+
+            return replacementException;
+        }
+
+        private static bool MatchesGenericType(Type type, Type matchType)
+        {
+            return type.IsGenericType && type.GetGenericTypeDefinition() == matchType;
+        }
+
+        private static Type MatchGenericTypeFirstOrDefault(Type[] types, Type matchType)
+        {
+            for (int i = 0; i < types.Length; i++)
+            {
+                Type type = types[i];
+                if (MatchesGenericType(type, matchType))
+                {
+                    return type;
+                }
+            }
+            return null;
         }
 
         private static bool StrongTryGetValueImpl<TKey, TValue>(object dictionary, string key, out object value)

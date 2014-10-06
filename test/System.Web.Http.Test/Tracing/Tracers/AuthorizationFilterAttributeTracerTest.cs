@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Web.Http.Controllers;
 using System.Web.Http.Filters;
+using System.Web.Http.Services;
 using Microsoft.TestCommon;
 using Moq;
 
@@ -121,13 +122,13 @@ namespace System.Web.Http.Tracing.Tracers
             mockActionDescriptor.Setup(a => a.ActionName).Returns("test");
             mockActionDescriptor.Setup(a => a.GetParameters()).Returns(new Collection<HttpParameterDescriptor>(new HttpParameterDescriptor[0]));
             HttpActionContext actionContext = ContextUtil.CreateActionContext(actionDescriptor: mockActionDescriptor.Object);
-            Func<Task<HttpResponseMessage>> continuation = () => TaskHelpers.FromResult<HttpResponseMessage>(new HttpResponseMessage());
+            Func<Task<HttpResponseMessage>> continuation = () => Task.FromResult<HttpResponseMessage>(new HttpResponseMessage());
             TestTraceWriter traceWriter = new TestTraceWriter();
             AuthorizationFilterAttributeTracer tracer = new AuthorizationFilterAttributeTracer(mockAttr.Object, traceWriter);
             TraceRecord[] expectedTraces = new TraceRecord[]
             {
-                new TraceRecord(actionContext.Request, TraceCategories.FiltersCategory, TraceLevel.Info) { Kind = TraceKind.Begin, Operation = "OnAuthorization" },
-                new TraceRecord(actionContext.Request, TraceCategories.FiltersCategory, TraceLevel.Info) { Kind = TraceKind.End,  Operation = "OnAuthorization" },
+                new TraceRecord(actionContext.Request, TraceCategories.FiltersCategory, TraceLevel.Info) { Kind = TraceKind.Begin, Operation = "OnAuthorizationAsync" },
+                new TraceRecord(actionContext.Request, TraceCategories.FiltersCategory, TraceLevel.Info) { Kind = TraceKind.End,  Operation = "OnAuthorizationAsync" },
             };
 
             // Act
@@ -149,13 +150,13 @@ namespace System.Web.Http.Tracing.Tracers
             mockActionDescriptor.Setup(a => a.ActionName).Returns("test");
             mockActionDescriptor.Setup(a => a.GetParameters()).Returns(new Collection<HttpParameterDescriptor>(new HttpParameterDescriptor[0]));
             HttpActionContext actionContext = ContextUtil.CreateActionContext(actionDescriptor: mockActionDescriptor.Object);
-            Func<Task<HttpResponseMessage>> continuation = () => TaskHelpers.FromResult<HttpResponseMessage>(new HttpResponseMessage());
+            Func<Task<HttpResponseMessage>> continuation = () => Task.FromResult<HttpResponseMessage>(new HttpResponseMessage());
             TestTraceWriter traceWriter = new TestTraceWriter();
             AuthorizationFilterAttributeTracer tracer = new AuthorizationFilterAttributeTracer(mockAttr.Object, traceWriter);
             TraceRecord[] expectedTraces = new TraceRecord[]
             {
-                new TraceRecord(actionContext.Request, TraceCategories.FiltersCategory, TraceLevel.Info) { Kind = TraceKind.Begin, Operation = "OnAuthorization" },
-                new TraceRecord(actionContext.Request, TraceCategories.FiltersCategory, TraceLevel.Error) { Kind = TraceKind.End,  Operation = "OnAuthorization" }
+                new TraceRecord(actionContext.Request, TraceCategories.FiltersCategory, TraceLevel.Info) { Kind = TraceKind.Begin, Operation = "OnAuthorizationAsync" },
+                new TraceRecord(actionContext.Request, TraceCategories.FiltersCategory, TraceLevel.Error) { Kind = TraceKind.End,  Operation = "OnAuthorizationAsync" }
             };
 
             // Act
@@ -167,6 +168,34 @@ namespace System.Web.Http.Tracing.Tracers
             Assert.Same(exception, thrown);
             Assert.Same(exception, traceWriter.Traces[1].Exception);
             Assert.Equal<TraceRecord>(expectedTraces, traceWriter.Traces, new TraceRecordComparer());
+        }
+
+        [Fact]
+        public void Inner_Property_On_AuthorizationFilterAttributeTracer_Returns_AuthorizationFilterAttribute()
+        {
+            // Arrange
+            AuthorizationFilterAttribute expectedInner = new Mock<AuthorizationFilterAttribute>().Object;
+            AuthorizationFilterAttributeTracer productUnderTest = new AuthorizationFilterAttributeTracer(expectedInner, new TestTraceWriter());
+
+            // Act
+            AuthorizationFilterAttribute actualInner = productUnderTest.Inner;
+
+            // Assert
+            Assert.Same(expectedInner, actualInner);
+        }
+
+        [Fact]
+        public void Decorator_GetInner_On_AuthorizationFilterAttributeTracer_Returns_AuthorizationFilterAttribute()
+        {
+            // Arrange
+            AuthorizationFilterAttribute expectedInner = new Mock<AuthorizationFilterAttribute>().Object;
+            AuthorizationFilterAttributeTracer productUnderTest = new AuthorizationFilterAttributeTracer(expectedInner, new TestTraceWriter());
+
+            // Act
+            AuthorizationFilterAttribute actualInner = Decorator.GetInner(productUnderTest as AuthorizationFilterAttribute);
+
+            // Assert
+            Assert.Same(expectedInner, actualInner);
         }
     }
 }

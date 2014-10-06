@@ -10,6 +10,7 @@ using System.Linq.Expressions;
 using System.Web.Mvc.Properties;
 using System.Web.Routing;
 using System.Web.UI.WebControls;
+using System.Web.WebPages;
 
 namespace System.Web.Mvc.Html
 {
@@ -49,6 +50,7 @@ namespace System.Web.Mvc.Html
                 { "Url", DefaultEditorTemplates.UrlInputTemplate },
                 { "EmailAddress", DefaultEditorTemplates.EmailAddressInputTemplate },
                 { "DateTime", DefaultEditorTemplates.DateTimeInputTemplate },
+                { "DateTime-local", DefaultEditorTemplates.DateTimeLocalInputTemplate },
                 { "Date", DefaultEditorTemplates.DateInputTemplate },
                 { "Time", DefaultEditorTemplates.TimeInputTemplate },
                 { typeof(Color).Name, DefaultEditorTemplates.ColorInputTemplate },
@@ -163,8 +165,24 @@ namespace System.Web.Mvc.Html
             // TODO: Make better string names for generic types
             yield return fieldType.Name;
 
-            if (!metadata.IsComplexType)
+            if (fieldType == typeof(string))
             {
+                // Nothing more to provide
+                yield break;
+            }
+            else if (!metadata.IsComplexType)
+            {
+                // IsEnum is false for the Enum class itself
+                if (fieldType.IsEnum)
+                {
+                    // Same as fieldType.BaseType.Name in this case
+                    yield return "Enum";
+                }
+                else if (fieldType == typeof(DateTimeOffset))
+                {
+                    yield return "DateTime";
+                }
+
                 yield return "String";
             }
             else if (fieldType.IsInterface)
@@ -286,7 +304,7 @@ namespace System.Web.Mvc.Html
 
             if (additionalViewData != null)
             {
-                foreach (KeyValuePair<string, object> kvp in new RouteValueDictionary(additionalViewData))
+                foreach (KeyValuePair<string, object> kvp in TypeHelper.ObjectToDictionary(additionalViewData))
                 {
                     viewData[kvp.Key] = kvp.Value;
                 }
@@ -301,9 +319,11 @@ namespace System.Web.Mvc.Html
 
         private static HtmlHelper MakeHtmlHelper(HtmlHelper html, ViewDataDictionary viewData)
         {
-            return new HtmlHelper(
+            var newHelper = new HtmlHelper(
                 new ViewContext(html.ViewContext, html.ViewContext.View, viewData, html.ViewContext.TempData, html.ViewContext.Writer),
                 new ViewDataContainer(viewData));
+            newHelper.Html5DateRenderingMode = html.Html5DateRenderingMode;
+            return newHelper;
         }
 
         internal class ActionCacheCodeItem : ActionCacheItem

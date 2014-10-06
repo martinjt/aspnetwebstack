@@ -1,17 +1,16 @@
 ﻿// Copyright (c) Microsoft Open Technologies, Inc. All rights reserved. See License.txt in the project root for license information.
 
 using System.Collections.Generic;
-using System.Linq;
 using System.Reflection;
 using System.Web.Mvc.Properties;
 
 namespace System.Web.Mvc
 {
-    public class ReflectedActionDescriptor : ActionDescriptor
+    public class ReflectedActionDescriptor : ActionDescriptor, IMethodInfoActionDescriptor
     {
         private readonly string _actionName;
         private readonly ControllerDescriptor _controllerDescriptor;
-        private readonly Lazy<string> _uniqueId;
+        private string _uniqueId;
         private ParameterDescriptor[] _parametersCache;
 
         public ReflectedActionDescriptor(MethodInfo methodInfo, string actionName, ControllerDescriptor controllerDescriptor)
@@ -46,7 +45,6 @@ namespace System.Web.Mvc
             MethodInfo = methodInfo;
             _actionName = actionName;
             _controllerDescriptor = controllerDescriptor;
-            _uniqueId = new Lazy<string>(CreateUniqueId);
         }
 
         public override string ActionName
@@ -63,7 +61,14 @@ namespace System.Web.Mvc
 
         public override string UniqueId
         {
-            get { return _uniqueId.Value; }
+            get 
+            {
+                if (_uniqueId == null)
+                {
+                    _uniqueId = CreateUniqueId();
+                }
+                return _uniqueId; 
+            }
         }
 
         private string CreateUniqueId()
@@ -82,10 +87,15 @@ namespace System.Web.Mvc
                 throw new ArgumentNullException("parameters");
             }
 
+            // Performance sensitive so avoid Linq or delegates.
             ParameterInfo[] parameterInfos = MethodInfo.GetParameters();
-            var rawParameterValues = from parameterInfo in parameterInfos
-                                     select ExtractParameterFromDictionary(parameterInfo, parameters, MethodInfo);
-            object[] parametersArray = rawParameterValues.ToArray();
+            object[] parametersArray = new object[parameterInfos.Length];
+            for (int i = 0; i < parameterInfos.Length; i++)
+            {
+                ParameterInfo parameterInfo = parameterInfos[i];
+                object parameter = ExtractParameterFromDictionary(parameterInfo, parameters, MethodInfo);
+                parametersArray[i] = parameter;
+            }
 
             ActionMethodDispatcher dispatcher = DispatcherCache.GetDispatcher(MethodInfo);
             object actionReturnValue = dispatcher.Execute(controllerContext.Controller, parametersArray);
@@ -120,6 +130,11 @@ namespace System.Web.Mvc
         public override ICollection<ActionSelector> GetSelectors()
         {
             return ActionDescriptorHelper.GetSelectors(MethodInfo);
+        }
+
+        internal override ICollection<ActionNameSelector> GetNameSelectors()
+        {
+            return ActionDescriptorHelper.GetNameSelectors(MethodInfo);
         }
 
         public override bool IsDefined(Type attributeType, bool inherit)

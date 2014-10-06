@@ -4,6 +4,7 @@ using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Net.Http.Formatting;
 using System.Net.Http.Headers;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Web.Http;
 
@@ -45,14 +46,33 @@ namespace System.Net.Http
         /// as HTML form URL-encoded data then the result is null.</returns>
         public static Task<NameValueCollection> ReadAsFormDataAsync(this HttpContent content)
         {
+            return ReadAsFormDataAsync(content, CancellationToken.None);
+        }
+
+        /// <summary>
+        /// Returns a <see cref="Task{T}"/> that will yield a <see cref="NameValueCollection"/> instance containing the form data
+        /// parsed as HTML form URL-encoded from the <paramref name="content"/> instance.
+        /// </summary>
+        /// <param name="content">The content.</param>
+        /// <param name="cancellationToken">The token to monitor for cancellation requests.</param>
+        /// <returns>A <see cref="Task{T}"/> which will provide the result. If the data can not be read
+        /// as HTML form URL-encoded data then the result is null.</returns>
+        public static Task<NameValueCollection> ReadAsFormDataAsync(this HttpContent content, CancellationToken cancellationToken)
+        {
             if (content == null)
             {
                 throw Error.ArgumentNull("content");
             }
 
             MediaTypeFormatter[] formatters = new MediaTypeFormatter[1] { new FormUrlEncodedMediaTypeFormatter() };
-            return content.ReadAsAsync<FormDataCollection>(formatters)
-                .Then(formdata => formdata != null ? formdata.ReadAsNameValueCollection() : null, runSynchronously: true);
+            return ReadAsAsyncCore(content, formatters, cancellationToken);
+        }
+
+        private static async Task<NameValueCollection> ReadAsAsyncCore(HttpContent content, MediaTypeFormatter[] formatters,
+            CancellationToken cancellationToken)
+        {
+            FormDataCollection formData = await content.ReadAsAsync<FormDataCollection>(formatters, cancellationToken);
+            return formData == null ? null : formData.ReadAsNameValueCollection();
         }
     }
 }

@@ -6,7 +6,9 @@ using System.Web.Http.Controllers;
 using System.Web.Http.Metadata;
 using System.Web.Http.Metadata.Providers;
 using System.Web.Http.ModelBinding;
+using System.Xml.Linq;
 using Microsoft.TestCommon;
+using Moq;
 
 namespace System.Web.Http.Validation
 {
@@ -79,6 +81,24 @@ namespace System.Web.Http.Validation
                             { "[1].Value.Profession", "The Profession field is required." }
                         }
                     },
+
+                    // IValidatableObject's
+                    { new ValidatableModel(), typeof(ValidatableModel), new Dictionary<string, string>()
+                        {
+                            { "", "Error1" },
+                            { "Property1", "Error2" },
+                            { "Property2", "Error3" },
+                            { "Property3", "Error3" }
+                        }
+                    },
+                    { new[] { new ValidatableModel() }, typeof(ValidatableModel[]), new Dictionary<string, string>()
+                        {
+                            { "[0]", "Error1" },
+                            { "[0].Property1", "Error2" },
+                            { "[0].Property2", "Error3" },
+                            { "[0].Property3", "Error3" }
+                        }
+                    },
                     
                     // Testing we don't blow up on cycles
                     { LonelyPerson, typeof(Person), new Dictionary<string, string>()
@@ -87,11 +107,20 @@ namespace System.Web.Http.Validation
                             { "Profession", "The Profession field is required." }
                         }
                     },
+
+                    // Testing that we don't bubble up exceptions when property getters throw
+                    { new Uri("/api/values", UriKind.Relative), typeof(Uri), new Dictionary<string, string>() },
+                    
+                    // Testing that excluded types don't result in any errors
+                    { typeof(string), typeof(Type), new Dictionary<string, string>() },
+                    { new byte[] { (byte)'a', (byte)'b' }, typeof(byte[]), new Dictionary<string, string>() },
+                    { XElement.Parse("<xml>abc</xml>"), typeof(XElement), new Dictionary<string, string>() }
                 };
             }
         }
 
         [Theory]
+        [ReplaceCulture]
         [PropertyData("ValidationErrors")]
         public void ExpectedValidationErrorsRaised(object model, Type type, Dictionary<string, string> expectedErrors)
         {
@@ -142,54 +171,117 @@ namespace System.Web.Http.Validation
         }
 
         [Fact]
-        public void ValidationErrorsNotAddedOnInvalidFields()
+        public void ExcludedTypes_AreNotValidated()
         {
             // Arrange
             ModelMetadataProvider metadataProvider = new DataAnnotationsModelMetadataProvider();
             HttpActionContext actionContext = ContextUtil.CreateActionContext();
-            object model = new Address() { Street = "Microsoft Way" };
-
-            actionContext.ModelState.AddModelError("Street", "error");
+            Mock<DefaultBodyModelValidator> mockValidator = new Mock<DefaultBodyModelValidator>();
+            mockValidator.CallBase = true;
+            mockValidator.Setup(validator => validator.ShouldValidateType(typeof(Person))).Returns(false);
 
             // Act
-            new DefaultBodyModelValidator().Validate(model, typeof(Address), metadataProvider, actionContext, string.Empty);
+            mockValidator.Object.Validate(new Person(), typeof(Person), metadataProvider, actionContext, string.Empty);
 
             // Assert
-            Assert.Contains("Street", actionContext.ModelState.Keys);
-            ModelState streetState = actionContext.ModelState["Street"];
-            Assert.Equal(1, streetState.Errors.Count);
+            Assert.True(actionContext.ModelState.IsValid);
         }
-    }
 
-    public class Person
-    {
-        [Required]
-        [StringLength(10)]
-        public string Name { get; set; }
+        [Fact]
+        public void ExcludedPropertyTypes_AreShallowValidated()
+        {
+            // Arrange
+            ModelMetadataProvider metadataProvider = new DataAnnotationsModelMetadataProvider();
+            HttpActionContext actionContext = ContextUtil.CreateActionContext();
+            Mock<DefaultBodyModelValidator> mockValidator = new Mock<DefaultBodyModelValidator>();
+            mockValidator.CallBase = true;
+            mockValidator.Setup(validator => validator.ShouldValidateType(typeof(Person))).Returns(false);
 
-        [Required]
-        public string Profession { get; set; }
+            // Act
+            mockValidator.Object.Validate(new Pet(), typeof(Pet), metadataProvider, actionContext, string.Empty);
 
-        public Person Friend { get; set; }
-    }
+            // Assert
+            Assert.False(actionContext.ModelState.IsValid);
+            ModelState modelState = actionContext.ModelState["Owner"];
+            Assert.Equal(1, modelState.Errors.Count);
+        }
 
-    public class Address
-    {
-        [StringLength(5)]
-        [RegularExpression("hehehe")]
-        public string Street { get; set; }
-    }
+        [Fact]
+        public void Validate_DoesNotUseOverridden_GetHashCodeOrEquals()
+        {
+            // Arrange
+            ModelMetadataProvider metadataProvider = new DataAnnotationsModelMetadataProvider();
+            HttpActionContext actionContext = ContextUtil.CreateActionContext();
+            DefaultBodyModelValidator validator = new DefaultBodyModelValidator();
+            object instance = new[] { new TypeThatOverridesEquals { Funny = "hehe" }, new TypeThatOverridesEquals { Funny = "hehe" } };
 
-    public struct ValueType
-    {
-        public int Value;
-        public string Reference;
-    }
+            // Act & Assert
+            Assert.DoesNotThrow(
+                () => validator.Validate(instance, typeof(TypeThatOverridesEquals[]), metadataProvider, actionContext, String.Empty));
+        }
 
-    public class ReferenceType
-    {
-        public static string StaticProperty { get { return "static"; } }
-        public int Value;
-        public string Reference;
+        public class Person
+        {
+            [Required]
+            [StringLength(10)]
+            public string Name { get; set; }
+
+            [Required]
+            public string Profession { get; set; }
+
+            public Person Friend { get; set; }
+        }
+
+        public class Address
+        {
+            [StringLength(5)]
+            [RegularExpression("hehehe")]
+            public string Street { get; set; }
+        }
+
+        public struct ValueType
+        {
+            public int Value;
+            public string Reference;
+        }
+
+        public class ReferenceType
+        {
+            public static string StaticProperty { get { return "static"; } }
+            public int Value;
+            public string Reference;
+        }
+
+        public class Pet
+        {
+            [Required]
+            public Person Owner { get; set; }
+        }
+
+        public class ValidatableModel : IValidatableObject
+        {
+            public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
+            {
+                yield return new ValidationResult("Error1", new string[] { });
+                yield return new ValidationResult("Error2", new[] { "Property1" });
+                yield return new ValidationResult("Error3", new[] { "Property2", "Property3" });
+            }
+        }
+
+        public class TypeThatOverridesEquals
+        {
+            [StringLength(2)]
+            public string Funny { get; set; }
+
+            public override bool Equals(object obj)
+            {
+                throw new InvalidOperationException();
+            }
+
+            public override int GetHashCode()
+            {
+                throw new InvalidOperationException();
+            }
+        }
     }
 }

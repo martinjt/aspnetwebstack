@@ -8,7 +8,6 @@ using System.Globalization;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.CompilerServices;
-using System.Web.Http;
 using System.Web.Mvc.Properties;
 
 namespace System.Web.Mvc
@@ -144,7 +143,7 @@ namespace System.Web.Mvc
 
         public virtual object BindModel(ControllerContext controllerContext, ModelBindingContext bindingContext)
         {
-            EnsureStackHelper.EnsureStack();
+            RuntimeHelpers.EnsureSufficientExecutionStack();
 
             if (bindingContext == null)
             {
@@ -196,10 +195,17 @@ namespace System.Web.Mvc
 
         private void BindProperties(ControllerContext controllerContext, ModelBindingContext bindingContext)
         {
-            IEnumerable<PropertyDescriptor> properties = GetFilteredModelProperties(controllerContext, bindingContext);
-            foreach (PropertyDescriptor property in properties)
+            PropertyDescriptorCollection properties = GetModelProperties(controllerContext, bindingContext);
+            Predicate<string> propertyFilter = bindingContext.PropertyFilter;
+
+            // Loop is a performance sensitive codepath so avoid using enumerators.
+            for (int i = 0; i < properties.Count; i++)
             {
-                BindProperty(controllerContext, bindingContext, property);
+                PropertyDescriptor property = properties[i];
+                if (ShouldUpdateProperty(property, propertyFilter))
+                {
+                    BindProperty(controllerContext, bindingContext, property);
+                }
             }
         }
 
@@ -246,7 +252,8 @@ namespace System.Web.Mvc
                 {
                     for (Exception exception = error.Exception; exception != null; exception = exception.InnerException)
                     {
-                        if (exception is FormatException)
+                        // We only consider "known" type of exception and do not make too aggressive changes here
+                        if (exception is FormatException || exception is OverflowException)
                         {
                             string displayName = propertyMetadata.GetDisplayName();
                             string errorMessageTemplate = GetValueInvalidResource(controllerContext);
@@ -369,6 +376,7 @@ namespace System.Web.Mvc
 
         protected virtual object CreateModel(ControllerContext controllerContext, ModelBindingContext bindingContext, Type modelType)
         {
+            // fallback to the type's default constructor
             Type typeToCreate = modelType;
 
             // we can understand some collection interfaces, e.g. IList<>, IDictionary<,>
@@ -385,8 +393,22 @@ namespace System.Web.Mvc
                 }
             }
 
-            // fallback to the type's default constructor
-            return Activator.CreateInstance(typeToCreate);
+            try
+            {
+                return Activator.CreateInstance(typeToCreate);
+            }
+            catch (MissingMethodException exception)
+            {
+                // Ensure thrown exception contains the type name.  Might be down a few levels.
+                MissingMethodException replacementException =
+                    TypeHelpers.EnsureDebuggableException(exception, typeToCreate.FullName);
+                if (replacementException != null)
+                {
+                    throw replacementException;
+                }
+
+                throw;
+            }
         }
 
         protected static string CreateSubIndexName(string prefix, int index)
@@ -417,6 +439,7 @@ namespace System.Web.Mvc
 
         protected IEnumerable<PropertyDescriptor> GetFilteredModelProperties(ControllerContext controllerContext, ModelBindingContext bindingContext)
         {
+            // Performance note: Retain for compatibility only. Faster version inlined
             PropertyDescriptorCollection properties = GetModelProperties(controllerContext, bindingContext);
             Predicate<string> propertyFilter = bindingContext.PropertyFilter;
 
@@ -762,12 +785,6 @@ namespace System.Web.Mvc
                 }
             }
 
-            // if there weren't any elements at all in the request, just return
-            if (modelList.Count == 0)
-            {
-                return null;
-            }
-
             // replace the original collection
             object dictionary = bindingContext.Model;
             CollectionHelpers.ReplaceDictionary(keyType, valueType, dictionary, modelList);
@@ -833,11 +850,14 @@ namespace System.Web.Mvc
                 dictionary.Clear();
                 foreach (KeyValuePair<object, object> item in newContents)
                 {
-                    // if the item was not a T, some conversion failed. the error message will be propagated,
-                    // but in the meanwhile we need to make a placeholder element in the dictionary.
-                    TKey castKey = (TKey)item.Key; // this cast shouldn't fail
-                    TValue castValue = (item.Value is TValue) ? (TValue)item.Value : default(TValue);
-                    dictionary[castKey] = castValue;
+                    if (item.Key is TKey)
+                    {
+                        // if the item was not a T, some conversion failed. the error message will be propagated,
+                        // but in the meanwhile we need to make a placeholder element in the dictionary.
+                        TKey castKey = (TKey)item.Key; // this cast shouldn't fail
+                        TValue castValue = (item.Value is TValue) ? (TValue)item.Value : default(TValue);
+                        dictionary[castKey] = castValue;
+                    }
                 }
             }
         }

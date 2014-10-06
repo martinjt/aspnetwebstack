@@ -2,7 +2,7 @@
 
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Diagnostics;
+using System.Diagnostics.Contracts;
 using System.Threading;
 using System.Web.Hosting;
 
@@ -20,14 +20,25 @@ namespace System.Web.WebPages
     internal class FileExistenceCache
     {
         private const int TicksPerMillisecond = 10000;
-        private readonly VirtualPathProvider _virtualPathProvider;
+        private readonly Func<VirtualPathProvider> _virtualPathProviderFunc;
+        private readonly Func<string, bool> _virtualPathFileExists;
         private ConcurrentDictionary<string, bool> _cache;
         private long _creationTick;
         private int _ticksBeforeReset;
 
+        // Overload used mainly for testing
         public FileExistenceCache(VirtualPathProvider virtualPathProvider, int milliSecondsBeforeReset = 1000)
+            : this(() => virtualPathProvider, milliSecondsBeforeReset)
         {
-            _virtualPathProvider = virtualPathProvider;
+            Contract.Assert(virtualPathProvider != null);
+        }
+
+        public FileExistenceCache(Func<VirtualPathProvider> virtualPathProviderFunc, int milliSecondsBeforeReset = 1000)
+        {
+            Contract.Assert(virtualPathProviderFunc != null);
+
+            _virtualPathProviderFunc = virtualPathProviderFunc;
+            _virtualPathFileExists = path => _virtualPathProviderFunc().FileExists(path);
             _ticksBeforeReset = milliSecondsBeforeReset * TicksPerMillisecond;
             Reset();
         }
@@ -35,7 +46,7 @@ namespace System.Web.WebPages
         // Use the VPP returned by the HostingEnvironment unless a custom vpp is passed in (mainly for testing purposes)
         public VirtualPathProvider VirtualPathProvider
         {
-            get { return _virtualPathProvider; }
+            get { return _virtualPathProviderFunc(); }
         }
 
         public int MilliSecondsBeforeReset
@@ -70,10 +81,8 @@ namespace System.Web.WebPages
             {
                 Reset();
             }
-            // The right way to do this is to verify in the constructor that the VirtualPathProvider argument is not null.
-            // However when unit testing this, we often new up instances when not running under Asp.Net when HostingEnvironment.VirtualPathProvider is null.
-            Debug.Assert(_virtualPathProvider != null);
-            return _cache.GetOrAdd(virtualPath, _virtualPathProvider.FileExists);
+
+            return _cache.GetOrAdd(virtualPath, _virtualPathFileExists);
         }
     }
 }

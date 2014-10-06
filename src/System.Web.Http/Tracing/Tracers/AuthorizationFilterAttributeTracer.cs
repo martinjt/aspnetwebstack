@@ -3,8 +3,12 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Contracts;
 using System.Net.Http;
+using System.Runtime.CompilerServices;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Web.Http.Controllers;
 using System.Web.Http.Filters;
+using System.Web.Http.Services;
 
 namespace System.Web.Http.Tracing.Tracers
 {
@@ -12,10 +16,8 @@ namespace System.Web.Http.Tracing.Tracers
     /// Tracer for <see cref="AuthorizationFilterAttribute"/>
     /// </summary>
     [SuppressMessage("Microsoft.Performance", "CA1813:AvoidUnsealedAttributes", Justification = "internal type needs to override, tracer are not sealed")]
-    internal class AuthorizationFilterAttributeTracer : AuthorizationFilterAttribute
+    internal class AuthorizationFilterAttributeTracer : AuthorizationFilterAttribute, IDecorator<AuthorizationFilterAttribute>
     {
-        private const string OnAuthorizationMethodName = "OnAuthorization";
-
         private readonly AuthorizationFilterAttribute _innerFilter;
         private readonly ITraceWriter _traceStore;
 
@@ -26,6 +28,11 @@ namespace System.Web.Http.Tracing.Tracers
 
             _innerFilter = innerFilter;
             _traceStore = traceWriter;
+        }
+
+        public AuthorizationFilterAttribute Inner
+        {
+            get { return _innerFilter; }
         }
 
         public override bool AllowMultiple
@@ -66,12 +73,24 @@ namespace System.Web.Http.Tracing.Tracers
 
         public override void OnAuthorization(HttpActionContext actionContext)
         {
-            _traceStore.TraceBeginEnd(
+           // this will not trace, all traces go through the async call.
+        }
+
+        public override Task OnAuthorizationAsync(HttpActionContext actionContext, CancellationToken cancellationToken)
+        {
+            return OnAuthorizationSyncCore(actionContext, cancellationToken);
+        }
+
+        private Task OnAuthorizationSyncCore(HttpActionContext actionContext,
+                                             CancellationToken cancellationToken,
+                                             [CallerMemberName] string methodName = null)
+        {
+            return _traceStore.TraceBeginEndAsync(
                 actionContext.ControllerContext.Request,
                 TraceCategories.FiltersCategory,
                 TraceLevel.Info,
                 _innerFilter.GetType().Name,
-                OnAuthorizationMethodName,
+                methodName,
                 beginTrace: (tr) =>
                 {
                     HttpResponseMessage response = actionContext.Response;
@@ -80,7 +99,7 @@ namespace System.Web.Http.Tracing.Tracers
                         tr.Status = response.StatusCode;
                     }
                 },
-                execute: () => { _innerFilter.OnAuthorization(actionContext);  },
+                execute: async () => { await _innerFilter.OnAuthorizationAsync(actionContext, cancellationToken); },
                 endTrace: (tr) =>
                 {
                     HttpResponseMessage response = actionContext.Response;

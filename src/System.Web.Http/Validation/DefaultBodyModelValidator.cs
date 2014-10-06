@@ -1,11 +1,12 @@
 ﻿// Copyright (c) Microsoft Open Technologies, Inc. All rights reserved. See License.txt in the project root for license information.
 
 using System.Collections;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Contracts;
 using System.Linq;
 using System.Net.Http.Formatting;
+using System.Runtime.CompilerServices;
 using System.Web.Http.Controllers;
 using System.Web.Http.Internal;
 using System.Web.Http.Metadata;
@@ -49,9 +50,8 @@ namespace System.Web.Http.Validation
                 throw Error.ArgumentNull("actionContext");
             }
 
-            if (model != null && MediaTypeFormatterCollection.IsTypeExcludedFromValidation(model.GetType()))
+            if (model != null && !ShouldValidateType(model.GetType()))
             {
-                // no validation for some DOM like types
                 return true;
             }
 
@@ -69,22 +69,60 @@ namespace System.Web.Http.Validation
                 ActionContext = actionContext,
                 ValidatorCache = actionContext.GetValidatorCache(),
                 ModelState = actionContext.ModelState,
-                Visited = new HashSet<object>(),
+                Visited = new HashSet<object>(ReferenceEqualityComparer.Instance),
                 KeyBuilders = new Stack<IKeyBuilder>(),
                 RootPrefix = keyPrefix
             };
-            return ValidateNodeAndChildren(metadata, validationContext, container: null);
+            return ValidateNodeAndChildren(metadata, validationContext, container: null, validators: null);
         }
 
-        private bool ValidateNodeAndChildren(ModelMetadata metadata, ValidationContext validationContext, object container)
-        {            
-            object model = metadata.Model;
+        /// <summary>
+        /// Determines whether instances of a particular type should be validated
+        /// </summary>
+        /// <param name="type">The type to validate.</param>
+        /// <returns><c>true</c> if the type should be validated; <c>false</c> otherwise</returns>
+        public virtual bool ShouldValidateType(Type type)
+        {
+            return !MediaTypeFormatterCollection.IsTypeExcludedFromValidation(type);
+        }
+
+        [SuppressMessage("Microsoft.Design", "CA1031:DoNotCatchGeneralExceptionTypes", Justification = "See comment below")]
+        private bool ValidateNodeAndChildren(ModelMetadata metadata, ValidationContext validationContext, object container, IEnumerable<ModelValidator> validators)
+        {
+            // Recursion guard to avoid stack overflows
+            RuntimeHelpers.EnsureSufficientExecutionStack();
+
+            object model = null;
+            try
+            {
+                model = metadata.Model;
+            }
+            catch
+            {
+                // Retrieving the model failed - typically caused by a property getter throwing
+                // Being unable to retrieve a property is not a validation error - many properties can only be retrieved if certain conditions are met
+                // For example, Uri.AbsoluteUri throws for relative URIs but it shouldn't be considered a validation error
+                return true;
+            }
+
             bool isValid = true;
 
-            // Optimization: we don't need to recursively traverse the graph for null and primitive types
-            if (model == null || TypeHelper.IsSimpleType(model.GetType()))
+            if (validators == null)
             {
-                return ShallowValidate(metadata, validationContext, container);
+                validators = validationContext.ActionContext.GetValidators(metadata, validationContext.ValidatorCache);
+            }
+
+            // We don't need to recursively traverse the graph for null values
+            if (model == null)
+            {
+                return ShallowValidate(metadata, validationContext, container, validators);
+            }
+
+            // We don't need to recursively traverse the graph for types that shouldn't be validated
+            Type modelType = model.GetType();
+            if (TypeHelper.IsSimpleType(modelType) || !ShouldValidateType(modelType))
+            {
+                return ShallowValidate(metadata, validationContext, container, validators);
             }
 
             // Check to avoid infinite recursion. This can happen with cycles in an object graph.
@@ -107,7 +145,7 @@ namespace System.Web.Http.Validation
             if (isValid)
             {
                 // Don't bother to validate this node if children failed.
-                isValid = ShallowValidate(metadata, validationContext, container);
+                isValid = ShallowValidate(metadata, validationContext, container, validators);
             }
 
             // Pop the object so that it can be validated again in a different path
@@ -124,7 +162,7 @@ namespace System.Web.Http.Validation
             foreach (ModelMetadata childMetadata in validationContext.MetadataProvider.GetMetadataForProperties(metadata.Model, metadata.RealModelType))
             {
                 propertyScope.PropertyName = childMetadata.PropertyName;
-                if (!ValidateNodeAndChildren(childMetadata, validationContext, metadata.Model))
+                if (!ValidateNodeAndChildren(childMetadata, validationContext, metadata.Model, validators: null))
                 {
                     isValid = false;
                 }
@@ -141,13 +179,27 @@ namespace System.Web.Http.Validation
 
             ElementScope elementScope = new ElementScope() { Index = 0 };
             validationContext.KeyBuilders.Push(elementScope);
+            IEnumerable<ModelValidator> validators = validationContext.ActionContext.GetValidators(elementMetadata, validationContext.ValidatorCache);
+
+            // if there are no validators or the object is null we bail out quickly
+            // when there are large arrays of null, this will save a significant amount of processing
+            // with minimal impact to other scenarios.
+            bool anyValidatorsDefined = validators.Any();
+
             foreach (object element in model)
             {
-                elementMetadata.Model = element;
-                if (!ValidateNodeAndChildren(elementMetadata, validationContext, model))
+                // If the element is non null, the recursive calls might find more validators.
+                // If it's null, then a shallow validation will be performed.
+                if (element != null || anyValidatorsDefined)
                 {
-                    isValid = false;
+                    elementMetadata.Model = element;
+
+                    if (!ValidateNodeAndChildren(elementMetadata, validationContext, model, validators))
+                    {
+                        isValid = false;
+                    }
                 }
+
                 elementScope.Index++;
             }
             validationContext.KeyBuilders.Pop();
@@ -156,30 +208,35 @@ namespace System.Web.Http.Validation
 
         // Validates a single node (not including children)
         // Returns true if validation passes successfully
-        private static bool ShallowValidate(ModelMetadata metadata, ValidationContext validationContext, object container)
+        private static bool ShallowValidate(ModelMetadata metadata, ValidationContext validationContext, object container, IEnumerable<ModelValidator> validators)
         {
             bool isValid = true;
-            string key = null;
-            foreach (ModelValidator validator in validationContext.ActionContext.GetValidators(metadata, validationContext.ValidatorCache))
+            string modelKey = null;
+
+            Contract.Assert(validators != null);
+
+            // When the are no validators we bail quickly. This saves a GetEnumerator allocation.
+            // In a large array (tens of thousands or more) scenario it's very significant.
+            ICollection validatorsAsCollection = validators as ICollection;
+            if (validatorsAsCollection != null && validatorsAsCollection.Count == 0)
+            {
+                return isValid;
+            }
+
+            foreach (ModelValidator validator in validators)
             {
                 foreach (ModelValidationResult error in validator.Validate(metadata, container))
                 {
-                    if (key == null)
+                    if (modelKey == null)
                     {
-                        key = validationContext.RootPrefix;
+                        modelKey = validationContext.RootPrefix;
                         foreach (IKeyBuilder keyBuilder in validationContext.KeyBuilders.Reverse())
                         {
-                            key = keyBuilder.AppendTo(key);
-                        }
-
-                        // Avoid adding model errors if the model state already contains model errors for that key
-                        // We can't perform this check earlier because we compute the key string only when we detect an error
-                        if (!validationContext.ModelState.IsValidField(key))
-                        {
-                            return false;
+                            modelKey = keyBuilder.AppendTo(modelKey);
                         }
                     }
-                    validationContext.ModelState.AddModelError(key, error.Message);
+                    string errorKey = ModelBindingHelper.CreatePropertyModelName(modelKey, error.MemberName);
+                    validationContext.ModelState.AddModelError(errorKey, error.Message);
                     isValid = false;
                 }
             }

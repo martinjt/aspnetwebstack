@@ -6,6 +6,9 @@ using System.Web.Http.Controllers;
 
 namespace System.Web.Http
 {
+    /// <summary>
+    /// Specifies that an action supports the HEAD HTTP method.
+    /// </summary>
     [AttributeUsage(AttributeTargets.Method, AllowMultiple = false, Inherited = true)]
     public sealed class HttpHeadAttribute : Attribute, IActionHttpMethodProvider
     {

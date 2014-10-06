@@ -1,8 +1,13 @@
 ﻿// Copyright (c) Microsoft Open Technologies, Inc. All rights reserved. See License.txt in the project root for license information.
 
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
+using System.Diagnostics.Contracts;
 using System.Linq;
+using System.Security.Principal;
 using System.Threading;
+using System.Web.Mvc.Filters;
+using System.Web.Mvc.Routing;
 
 namespace System.Web.Mvc.Async
 {
@@ -12,13 +17,16 @@ namespace System.Web.Mvc.Async
         private static readonly object _invokeActionMethodTag = new object();
         private static readonly object _invokeActionMethodWithFiltersTag = new object();
 
+        [SuppressMessage("Microsoft.Maintainability", "CA1506:AvoidExcessiveClassCoupling", Justification = "Refactoring to reduce coupling not currently justified.")]
         public virtual IAsyncResult BeginInvokeAction(ControllerContext controllerContext, string actionName, AsyncCallback callback, object state)
         {
             if (controllerContext == null)
             {
                 throw new ArgumentNullException("controllerContext");
             }
-            if (String.IsNullOrEmpty(actionName))
+
+            Contract.Assert(controllerContext.RouteData != null);
+            if (String.IsNullOrEmpty(actionName) && !controllerContext.RouteData.HasDirectRouteMatch())
             {
                 throw Error.ParameterCannotBeNullOrEmpty("actionName");
             }
@@ -34,27 +42,57 @@ namespace System.Web.Mvc.Async
                 {
                     try
                     {
-                        AuthorizationContext authContext = InvokeAuthorizationFilters(controllerContext, filterInfo.AuthorizationFilters, actionDescriptor);
-                        if (authContext.Result != null)
+                        AuthenticationContext authenticationContext = InvokeAuthenticationFilters(controllerContext,
+                            filterInfo.AuthenticationFilters, actionDescriptor);
+                        if (authenticationContext.Result != null)
                         {
-                            // the auth filter signaled that we should let it short-circuit the request
-                            continuation = () => InvokeActionResult(controllerContext, authContext.Result);
+                            // An authentication filter signaled that we should short-circuit the request. Let all
+                            // authentication filters contribute to an action result (to combine authentication
+                            // challenges). Then, run this action result.
+                            AuthenticationChallengeContext challengeContext =
+                                InvokeAuthenticationFiltersChallenge(controllerContext,
+                                filterInfo.AuthenticationFilters, actionDescriptor, authenticationContext.Result);
+                            continuation = () => InvokeActionResult(controllerContext,
+                                challengeContext.Result ?? authenticationContext.Result);
                         }
                         else
                         {
-                            if (controllerContext.Controller.ValidateRequest)
+                            AuthorizationContext authorizationContext = InvokeAuthorizationFilters(controllerContext, filterInfo.AuthorizationFilters, actionDescriptor);
+                            if (authorizationContext.Result != null)
                             {
-                                ValidateRequest(controllerContext);
+                                // An authorization filter signaled that we should short-circuit the request. Let all
+                                // authentication filters contribute to an action result (to combine authentication
+                                // challenges). Then, run this action result.
+                                AuthenticationChallengeContext challengeContext =
+                                    InvokeAuthenticationFiltersChallenge(controllerContext,
+                                    filterInfo.AuthenticationFilters, actionDescriptor, authorizationContext.Result);
+                                continuation = () => InvokeActionResult(controllerContext,
+                                    challengeContext.Result ?? authorizationContext.Result);
                             }
-
-                            IDictionary<string, object> parameters = GetParameterValues(controllerContext, actionDescriptor);
-                            IAsyncResult asyncResult = BeginInvokeActionMethodWithFilters(controllerContext, filterInfo.ActionFilters, actionDescriptor, parameters, asyncCallback, asyncState);
-                            continuation = () =>
+                            else
                             {
-                                ActionExecutedContext postActionContext = EndInvokeActionMethodWithFilters(asyncResult);
-                                InvokeActionResultWithFilters(controllerContext, filterInfo.ResultFilters, postActionContext.Result);
-                            };
-                            return asyncResult;
+                                if (controllerContext.Controller.ValidateRequest)
+                                {
+                                    ValidateRequest(controllerContext);
+                                }
+
+                                IDictionary<string, object> parameters = GetParameterValues(controllerContext, actionDescriptor);
+                                IAsyncResult asyncResult = BeginInvokeActionMethodWithFilters(controllerContext, filterInfo.ActionFilters, actionDescriptor, parameters, asyncCallback, asyncState);
+                                continuation = () =>
+                                {
+                                    ActionExecutedContext postActionContext = EndInvokeActionMethodWithFilters(asyncResult);
+                                    // The action succeeded. Let all authentication filters contribute to an action
+                                    // result (to combine authentication challenges; some authentication filters need
+                                    // to do negotiation even on a successful result). Then, run this action result.
+                                    AuthenticationChallengeContext challengeContext =
+                                        InvokeAuthenticationFiltersChallenge(controllerContext,
+                                        filterInfo.AuthenticationFilters, actionDescriptor,
+                                        postActionContext.Result);
+                                    InvokeActionResultWithFilters(controllerContext, filterInfo.ResultFilters,
+                                        challengeContext.Result ?? postActionContext.Result);
+                                };
+                                return asyncResult;
+                            }
                         }
                     }
                     catch (ThreadAbortException)
@@ -151,34 +189,21 @@ namespace System.Web.Mvc.Async
 
             BeginInvokeDelegate beginDelegate = delegate(AsyncCallback asyncCallback, object asyncState)
             {
-                ActionExecutingContext preContext = new ActionExecutingContext(controllerContext, actionDescriptor, parameters);
-                IAsyncResult innerAsyncResult = null;
+                AsyncInvocationWithFilters invocation = new AsyncInvocationWithFilters(this, controllerContext, actionDescriptor, filters, parameters, asyncCallback, asyncState);
 
-                Func<Func<ActionExecutedContext>> beginContinuation = () =>
-                {
-                    innerAsyncResult = BeginInvokeActionMethod(controllerContext, actionDescriptor, parameters, asyncCallback, asyncState);
-                    return () =>
-                           new ActionExecutedContext(controllerContext, actionDescriptor, false /* canceled */, null /* exception */)
-                           {
-                               Result = EndInvokeActionMethod(innerAsyncResult)
-                           };
-                };
+                const int StartingFilterIndex = 0;
+                endContinuation = invocation.InvokeActionMethodFilterAsynchronouslyRecursive(StartingFilterIndex);
 
-                // need to reverse the filter list because the continuations are built up backward
-                Func<Func<ActionExecutedContext>> thunk = filters.Reverse().Aggregate(beginContinuation,
-                                                                                      (next, filter) => () => InvokeActionMethodFilterAsynchronously(filter, preContext, next));
-                endContinuation = thunk();
-
-                if (innerAsyncResult != null)
+                if (invocation.InnerAsyncResult != null)
                 {
                     // we're just waiting for the inner result to complete
-                    return innerAsyncResult;
+                    return invocation.InnerAsyncResult;
                 }
                 else
                 {
                     // something was short-circuited and the action was not called, so this was a synchronous operation
                     SimpleAsyncResult newAsyncResult = new SimpleAsyncResult(asyncState);
-                    newAsyncResult.MarkCompleted(true /* completedSynchronously */, asyncCallback);
+                    newAsyncResult.MarkCompleted(completedSynchronously: true, callback: asyncCallback);
                     return newAsyncResult;
                 }
             };
@@ -210,9 +235,13 @@ namespace System.Web.Mvc.Async
 
         private IAsyncResult BeginInvokeSynchronousActionMethod(ControllerContext controllerContext, ActionDescriptor actionDescriptor, IDictionary<string, object> parameters, AsyncCallback callback, object state)
         {
-            return AsyncResultWrapper.BeginSynchronous(callback, state,
-                                                       () => InvokeSynchronousActionMethod(controllerContext, actionDescriptor, parameters),
-                                                       _invokeActionMethodTag);
+            // Frequently called so ensure delegate remains static and arguments do not allocate
+            EndInvokeDelegate<ActionInvocation, ActionResult> endInvokeFunc = (asyncResult, innerInvokeState) =>
+                {
+                    return innerInvokeState.InvokeSynchronousActionMethod();
+                };
+            ActionInvocation endInvokeState = new ActionInvocation(this, controllerContext, actionDescriptor, parameters);
+            return AsyncResultWrapper.BeginSynchronous(callback, state, endInvokeFunc, endInvokeState, _invokeActionMethodTag);
         }
 
         public virtual bool EndInvokeAction(IAsyncResult asyncResult)
@@ -232,95 +261,183 @@ namespace System.Web.Mvc.Async
 
         protected override ControllerDescriptor GetControllerDescriptor(ControllerContext controllerContext)
         {
+            // Frequently called, so ensure delegate is static
             Type controllerType = controllerContext.Controller.GetType();
-            ControllerDescriptor controllerDescriptor = DescriptorCache.GetDescriptor(controllerType, () => new ReflectedAsyncControllerDescriptor(controllerType));
+            ControllerDescriptor controllerDescriptor = DescriptorCache.GetDescriptor(
+                controllerType: controllerType,
+                creator: ReflectedAsyncControllerDescriptor.DefaultDescriptorFactory,
+                state: controllerType);
             return controllerDescriptor;
         }
 
-        internal static Func<ActionExecutedContext> InvokeActionMethodFilterAsynchronously(IActionFilter filter, ActionExecutingContext preContext, Func<Func<ActionExecutedContext>> nextInChain)
+        // Keep as value type to avoid per-call allocation
+        private struct ActionInvocation
         {
-            filter.OnActionExecuting(preContext);
-            if (preContext.Result != null)
+            private readonly AsyncControllerActionInvoker _invoker;
+            private readonly ControllerContext _controllerContext;
+            private readonly ActionDescriptor _actionDescriptor;
+            private readonly IDictionary<string, object> _parameters;
+
+            internal ActionInvocation(AsyncControllerActionInvoker invoker, ControllerContext controllerContext, ActionDescriptor actionDescriptor, IDictionary<string, object> parameters)
             {
-                ActionExecutedContext shortCircuitedPostContext = new ActionExecutedContext(preContext, preContext.ActionDescriptor, true /* canceled */, null /* exception */)
-                {
-                    Result = preContext.Result
-                };
-                return () => shortCircuitedPostContext;
+                Contract.Assert(invoker != null);
+                Contract.Assert(controllerContext != null);
+                Contract.Assert(actionDescriptor != null);
+                Contract.Assert(parameters != null);
+
+                _invoker = invoker;
+                _controllerContext = controllerContext;
+                _actionDescriptor = actionDescriptor;
+                _parameters = parameters;
             }
 
-            // There is a nested try / catch block here that contains much the same logic as the outer block.
-            // Since an exception can occur on either side of the asynchronous invocation, we need guards on
-            // on both sides. In the code below, the second side is represented by the nested delegate. This
-            // is really just a parallel of the synchronous ControllerActionInvoker.InvokeActionMethodFilter()
-            // method.
-
-            try
+            internal ActionResult InvokeSynchronousActionMethod()
             {
-                Func<ActionExecutedContext> continuation = nextInChain();
-
-                // add our own continuation, then return the new function
-                return () =>
-                {
-                    ActionExecutedContext postContext;
-                    bool wasError = true;
-
-                    try
-                    {
-                        postContext = continuation();
-                        wasError = false;
-                    }
-                    catch (ThreadAbortException)
-                    {
-                        // This type of exception occurs as a result of Response.Redirect(), but we special-case so that
-                        // the filters don't see this as an error.
-                        postContext = new ActionExecutedContext(preContext, preContext.ActionDescriptor, false /* canceled */, null /* exception */);
-                        filter.OnActionExecuted(postContext);
-                        throw;
-                    }
-                    catch (Exception ex)
-                    {
-                        postContext = new ActionExecutedContext(preContext, preContext.ActionDescriptor, false /* canceled */, ex);
-                        filter.OnActionExecuted(postContext);
-                        if (!postContext.ExceptionHandled)
-                        {
-                            throw;
-                        }
-                    }
-                    if (!wasError)
-                    {
-                        filter.OnActionExecuted(postContext);
-                    }
-
-                    return postContext;
-                };
-            }
-            catch (ThreadAbortException)
-            {
-                // This type of exception occurs as a result of Response.Redirect(), but we special-case so that
-                // the filters don't see this as an error.
-                ActionExecutedContext postContext = new ActionExecutedContext(preContext, preContext.ActionDescriptor, false /* canceled */, null /* exception */);
-                filter.OnActionExecuted(postContext);
-                throw;
-            }
-            catch (Exception ex)
-            {
-                ActionExecutedContext postContext = new ActionExecutedContext(preContext, preContext.ActionDescriptor, false /* canceled */, ex);
-                filter.OnActionExecuted(postContext);
-                if (postContext.ExceptionHandled)
-                {
-                    return () => postContext;
-                }
-                else
-                {
-                    throw;
-                }
+                return _invoker.InvokeActionMethod(_controllerContext, _actionDescriptor, _parameters);
             }
         }
 
-        private ActionResult InvokeSynchronousActionMethod(ControllerContext controllerContext, ActionDescriptor actionDescriptor, IDictionary<string, object> parameters)
+        // Large and passed to many function calls, so keep as a reference type to minimize copying
+        private class AsyncInvocationWithFilters
         {
-            return InvokeActionMethod(controllerContext, actionDescriptor, parameters);
+            private readonly AsyncControllerActionInvoker _invoker;
+            private readonly ControllerContext _controllerContext;
+            private readonly ActionDescriptor _actionDescriptor;
+            private readonly IList<IActionFilter> _filters;
+            private readonly IDictionary<string, object> _parameters;
+            private readonly AsyncCallback _asyncCallback;
+            private readonly object _asyncState;
+            private readonly int _filterCount;
+            private readonly ActionExecutingContext _preContext;
+
+            internal IAsyncResult InnerAsyncResult;
+
+            internal AsyncInvocationWithFilters(AsyncControllerActionInvoker invoker, ControllerContext controllerContext, ActionDescriptor actionDescriptor, IList<IActionFilter> filters, IDictionary<string, object> parameters, AsyncCallback asyncCallback, object asyncState)
+            {
+                Contract.Assert(invoker != null);
+                Contract.Assert(controllerContext != null);
+                Contract.Assert(actionDescriptor != null);
+                Contract.Assert(filters != null);
+                Contract.Assert(parameters != null);
+
+                _invoker = invoker;
+                _controllerContext = controllerContext;
+                _actionDescriptor = actionDescriptor;
+                _filters = filters;
+                _parameters = parameters;
+                _asyncCallback = asyncCallback;
+                _asyncState = asyncState;
+
+                _preContext = new ActionExecutingContext(controllerContext, actionDescriptor, parameters);
+                // For IList<T> it is faster to cache the count
+                _filterCount = _filters.Count;
+            }
+
+            internal Func<ActionExecutedContext> InvokeActionMethodFilterAsynchronouslyRecursive(int filterIndex)
+            {
+                // Performance-sensitive
+
+                // For compatability, the following behavior must be maintained
+                //   The OnActionExecuting events must fire in forward order
+                //   The Begin and End events must fire
+                //   The OnActionExecuted events must fire in reverse order
+                //   Earlier filters can process the results and exceptions from the handling of later filters
+                // This is achieved by calling recursively and moving through the filter list forwards
+
+                // If there are no more filters to recurse over, create the main result
+                if (filterIndex > _filterCount - 1)
+                {
+                    InnerAsyncResult = _invoker.BeginInvokeActionMethod(_controllerContext, _actionDescriptor, _parameters, _asyncCallback, _asyncState);
+                    return () =>
+                           new ActionExecutedContext(_controllerContext, _actionDescriptor, canceled: false, exception: null)
+                           {
+                               Result = _invoker.EndInvokeActionMethod(InnerAsyncResult)
+                           };
+                }
+
+                // Otherwise process the filters recursively
+                IActionFilter filter = _filters[filterIndex];
+                ActionExecutingContext preContext = _preContext;
+                filter.OnActionExecuting(preContext);
+                if (preContext.Result != null)
+                {
+                    ActionExecutedContext shortCircuitedPostContext = new ActionExecutedContext(preContext, preContext.ActionDescriptor, canceled: true, exception: null)
+                    {
+                        Result = preContext.Result
+                    };
+                    return () => shortCircuitedPostContext;
+                }
+
+                // There is a nested try / catch block here that contains much the same logic as the outer block.
+                // Since an exception can occur on either side of the asynchronous invocation, we need guards on
+                // on both sides. In the code below, the second side is represented by the nested delegate. This
+                // is really just a parallel of the synchronous ControllerActionInvoker.InvokeActionMethodFilter()
+                // method.
+
+                try
+                {
+                    // Use the filters in forward direction
+                    int nextFilterIndex = filterIndex + 1;
+                    Func<ActionExecutedContext> continuation = InvokeActionMethodFilterAsynchronouslyRecursive(nextFilterIndex);
+
+                    // add our own continuation, then return the new function
+                    return () =>
+                    {
+                        ActionExecutedContext postContext;
+                        bool wasError = true;
+
+                        try
+                        {
+                            postContext = continuation();
+                            wasError = false;
+                        }
+                        catch (ThreadAbortException)
+                        {
+                            // This type of exception occurs as a result of Response.Redirect(), but we special-case so that
+                            // the filters don't see this as an error.
+                            postContext = new ActionExecutedContext(preContext, preContext.ActionDescriptor, canceled: false, exception: null);
+                            filter.OnActionExecuted(postContext);
+                            throw;
+                        }
+                        catch (Exception ex)
+                        {
+                            postContext = new ActionExecutedContext(preContext, preContext.ActionDescriptor, canceled: false, exception: ex);
+                            filter.OnActionExecuted(postContext);
+                            if (!postContext.ExceptionHandled)
+                            {
+                                throw;
+                            }
+                        }
+                        if (!wasError)
+                        {
+                            filter.OnActionExecuted(postContext);
+                        }
+
+                        return postContext;
+                    };
+                }
+                catch (ThreadAbortException)
+                {
+                    // This type of exception occurs as a result of Response.Redirect(), but we special-case so that
+                    // the filters don't see this as an error.
+                    ActionExecutedContext postContext = new ActionExecutedContext(preContext, preContext.ActionDescriptor, canceled: false, exception: null);
+                    filter.OnActionExecuted(postContext);
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    ActionExecutedContext postContext = new ActionExecutedContext(preContext, preContext.ActionDescriptor, canceled: false, exception: ex);
+                    filter.OnActionExecuted(postContext);
+                    if (postContext.ExceptionHandled)
+                    {
+                        return () => postContext;
+                    }
+                    else
+                    {
+                        throw;
+                    }
+                }
+            }
         }
     }
 }

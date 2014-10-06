@@ -1,11 +1,14 @@
 ﻿// Copyright (c) Microsoft Open Technologies, Inc. All rights reserved. See License.txt in the project root for license information.
 
 using System.Collections.ObjectModel;
+using System.IO;
 using System.Linq;
 using System.Net.Http.Formatting.DataSets;
 using System.Net.Http.Formatting.Mocks;
 using System.Net.Http.Headers;
 using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Web.Http;
 using Microsoft.TestCommon;
 using Moq;
@@ -45,10 +48,31 @@ namespace System.Net.Http.Formatting
             Collection<MediaTypeHeaderValue> supportedMediaTypes = formatter.SupportedMediaTypes;
             Assert.NotNull(supportedMediaTypes);
             Assert.Equal(0, supportedMediaTypes.Count);
-
+#if !NETFX_CORE // No MediaTypeMapping support in portable libraries
             Collection<MediaTypeMapping> mappings = formatter.MediaTypeMappings;
+
             Assert.NotNull(mappings);
             Assert.Equal(0, mappings.Count);
+#endif
+        }
+
+        [Fact]
+        void CopyConstructor()
+        {
+            TestMediaTypeFormatter formatter = new TestMediaTypeFormatter();
+            TestMediaTypeFormatter derivedFormatter = new TestMediaTypeFormatter(formatter);
+
+#if !NETFX_CORE // No MediaTypeMapping or RequiredMemberSelector in client libraries
+            Assert.Same(formatter.MediaTypeMappings, derivedFormatter.MediaTypeMappings);
+            Assert.Same(formatter.MediaTypeMappingsInternal, derivedFormatter.MediaTypeMappingsInternal);
+            Assert.Equal(formatter.RequiredMemberSelector, derivedFormatter.RequiredMemberSelector);
+#endif
+
+            Assert.Same(formatter.SupportedMediaTypes, derivedFormatter.SupportedMediaTypes);
+            Assert.Same(formatter.SupportedMediaTypesInternal, derivedFormatter.SupportedMediaTypesInternal);
+
+            Assert.Same(formatter.SupportedEncodings, derivedFormatter.SupportedEncodings);
+            Assert.Same(formatter.SupportedEncodingsInternal, derivedFormatter.SupportedEncodingsInternal);
         }
 
         [Fact]
@@ -116,6 +140,7 @@ namespace System.Net.Http.Formatting
             Assert.ThrowsArgument(() => supportedMediaTypes.Insert(0, mediaType), "item", Error.Format(Properties.Resources.CannotUseMediaRangeForSupportedMediaType, typeof(MediaTypeHeaderValue).Name, mediaType.MediaType));
         }
 
+#if !NETFX_CORE // No MediaTypeMapping support in portable libraries
         [Fact]
         public void MediaTypeMappings_IsMutable()
         {
@@ -129,6 +154,7 @@ namespace System.Net.Http.Formatting
 
             Assert.True(standardMappings.SequenceEqual(formatter.MediaTypeMappings));
         }
+#endif
 
         [Fact]
         public void SelectCharacterEncoding_ThrowsIfNoSupportedEncodings()
@@ -303,12 +329,58 @@ namespace System.Net.Http.Formatting
             Assert.Equal(encoding.WebName, contentHeaders.ContentType.CharSet);
         }
 
+        [Fact]
+        public async Task WriteToStreamAsyncWithCancellationToken_GetsCalled_DuringObjectContentWrite()
+        {
+            // Arrange
+            object value = new object();
+            Type type = typeof(object);
+            MemoryStream stream = new MemoryStream();
+            Mock<MediaTypeFormatter> formatter = new Mock<MediaTypeFormatter>{ CallBase = true };
+
+            formatter.Setup(f => f.CanWriteType(type)).Returns(true);
+            formatter
+                .Setup(f => f.WriteToStreamAsync(type, value, stream, It.IsAny<ObjectContent>(), null, CancellationToken.None))
+                .Returns(TaskHelpers.Completed())
+                .Verifiable();
+
+            ObjectContent content = new ObjectContent(type, value, formatter.Object);
+
+            // Act
+            await content.CopyToAsync(stream);
+
+            // Assert
+            formatter.Verify();
+        }
+
         public struct TestStruct
         {
             private int I;
             public TestStruct(int i)
             {
                 I = i + 1;
+            }
+        }
+
+        private class TestMediaTypeFormatter : MediaTypeFormatter
+        {
+            public TestMediaTypeFormatter()
+            {
+            }
+
+            public TestMediaTypeFormatter(TestMediaTypeFormatter formatter)
+                : base(formatter)
+            {
+            }
+
+            public override bool CanReadType(Type type)
+            {
+                return true;
+            }
+
+            public override bool CanWriteType(Type type)
+            {
+                return true;
             }
         }
     }

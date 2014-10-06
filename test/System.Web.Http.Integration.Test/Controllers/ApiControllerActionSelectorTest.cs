@@ -21,7 +21,8 @@ namespace System.Web.Http
         [InlineData("GET", "Test/5?random=9", "GetUser")]
         [InlineData("Post", "Test", "PostUser")]
         [InlineData("Post", "Test?name=mario&age=10", "PostUserByNameAndAge")]
-        // Note: Normally the following would not match DeleteUserByIdAndOptName because it has 'id' and 'age' as parameters while the DeleteUserByIdAndOptName action has 'id' and 'name'. 
+
+        // Note: Normally the following would not match DeleteUserByIdAndOptName because it has 'id' and 'age' as parameters while the DeleteUserByIdAndOptName action has 'id' and 'name'.
         // However, because the default value is provided on action parameter 'name', having the 'id' in the request was enough to match the action.
         [InlineData("Delete", "Test/6?age=10", "DeleteUserByIdAndOptName")]
         [InlineData("Delete", "Test", "DeleteUserByOptName")]
@@ -219,6 +220,7 @@ namespace System.Web.Http
 
             Assert.Equal(HttpStatusCode.MethodNotAllowed, exception.Response.StatusCode);
             var content = Assert.IsType<ObjectContent<HttpError>>(exception.Response.Content);
+            AssertAllowedHeaders(exception.Response, HttpMethod.Get);
             Assert.Equal("The requested resource does not support http method 'POST'.", ((HttpError)content.Value).Message);
         }
 
@@ -248,6 +250,17 @@ namespace System.Web.Http
             Assert.Equal(HttpStatusCode.MethodNotAllowed, exception.Response.StatusCode);
             var content = Assert.IsType<ObjectContent<HttpError>>(exception.Response.Content);
             Assert.Equal("The requested resource does not support http method 'PUT'.", ((HttpError)content.Value).Message);
+            AssertAllowedHeaders(exception.Response, HttpMethod.Get, new HttpMethod("PATCH"), HttpMethod.Post, HttpMethod.Delete, HttpMethod.Head);
+        }
+
+        // Verify response has all the methods in its Allow header. values are unsorted. 
+        private void AssertAllowedHeaders(HttpResponseMessage response, params HttpMethod[] allowedMethods)
+        {
+            foreach (var method in allowedMethods)
+            {
+                Assert.Contains(method.ToString(), response.Content.Headers.Allow);
+            }
+            Assert.Equal(allowedMethods.Length, response.Content.Headers.Allow.Count);
         }
 
         [Theory]
@@ -266,6 +279,22 @@ namespace System.Web.Http
             HttpControllerContext context = ApiControllerHelper.CreateControllerContext(httpMethod, requestUrl, routeUrl, routeDefault);
             context.Configuration.Services.Add(typeof(ValueProviderFactory), new HeaderValueProviderFactory());
             context.ControllerDescriptor = new HttpControllerDescriptor(context.Configuration, "test", typeof(TestController));
+            HttpActionDescriptor descriptor = ApiControllerHelper.SelectAction(context);
+
+            Assert.Equal(expectedActionName, descriptor.ActionName);
+        }
+
+        [Theory]
+        [InlineData("GET", "Test", "Get")]
+        [InlineData("GET", "Test?scope=global", "GetWithEnumParameter")]
+        [InlineData("GET", "Test?level=off&kind=trace", "GetWithTwoEnumParameters")]
+        [InlineData("GET", "Test?level=", "GetWithNullableEnumParameter")]
+        public void SelectAction_ReturnsActionDescriptor_ForEnumParameterOverloads(string httpMethod, string requestUrl, string expectedActionName)
+        {
+            string routeUrl = "{controller}";
+
+            HttpControllerContext context = ApiControllerHelper.CreateControllerContext(httpMethod, requestUrl, routeUrl);
+            context.ControllerDescriptor = new HttpControllerDescriptor(context.Configuration, "EnumParameterOverloadsController", typeof(EnumParameterOverloadsController));
             HttpActionDescriptor descriptor = ApiControllerHelper.SelectAction(context);
 
             Assert.Equal(expectedActionName, descriptor.ActionName);

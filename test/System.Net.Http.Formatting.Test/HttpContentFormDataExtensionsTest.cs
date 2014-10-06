@@ -4,6 +4,7 @@ using System.Collections.Specialized;
 using System.Net.Http.Formatting;
 using System.Net.Http.Headers;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.TestCommon;
 
@@ -109,6 +110,17 @@ namespace System.Net.Http
             Assert.ThrowsArgumentNull(() => HttpContentFormDataExtensions.ReadAsFormDataAsync(null), "content");
         }
 
+        [Fact]
+        public void ReadAsFromDataAsync_PassesCancellationToken()
+        {
+            CancellationTokenSource cts = new CancellationTokenSource();
+            cts.Cancel();
+            HttpContent content = new StringContent("");
+            content.Headers.ContentType = MediaTypeConstants.ApplicationFormUrlEncodedMediaType;
+
+            Assert.Throws<TaskCanceledException>(() => content.ReadAsFormDataAsync(cts.Token).Wait());
+        }
+
         [Theory]
         [PropertyData("FormData")]
         public Task ReadAsFormDataAsync_HandlesFormData(string formData)
@@ -153,8 +165,8 @@ namespace System.Net.Http
         [Fact]
         public void ReadAsFormDataAsync_HandlesNonFormData()
         {
-            HttpContent content = new StringContent(String.Empty, Encoding.UTF8, "test/unknown");
-            Assert.Throws<InvalidOperationException>(() => content.ReadAsFormDataAsync());
+            HttpContent content = new StringContent("{}", Encoding.UTF8, "test/unknown");
+            Assert.Throws<UnsupportedMediaTypeException>(() => content.ReadAsFormDataAsync().Wait());
         }
     }
 }

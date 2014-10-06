@@ -1,9 +1,15 @@
 ﻿// Copyright (c) Microsoft Open Technologies, Inc. All rights reserved. See License.txt in the project root for license information.
 
+using System.Collections.Generic;
+using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Formatting;
 using System.Net.Http.Headers;
 using System.Text;
+using System.Web.Http.Controllers;
+using System.Web.Http.Validation;
+using System.Web.Http.Validation.Providers;
+using System.Web.Http.ValueProviders;
 using Microsoft.TestCommon;
 using Moq;
 
@@ -26,20 +32,21 @@ namespace System.Web.Http.ModelBinding
             Assert.Equal(expectedMvc, FormDataCollectionExtensions.NormalizeJQueryToMvc(jqueryString));            
         }
 
-        private static HttpContent FormContent(string s)
+        [Fact]
+        public void TestGetJQueryNameValuePairs()
         {
-            HttpContent content = new StringContent(s);
-            content.Headers.ContentType = new MediaTypeHeaderValue("application/x-www-form-urlencoded");
+            // Arrange
+            var formData = new FormDataCollection("x.y=30&x[y]=70&x[z][20]=cool");
 
-            return content;
-        }
+            // Act
+            var actual = FormDataCollectionExtensions.GetJQueryNameValuePairs(formData).ToArray();
 
-        private T ParseJQuery<T>(string jquery)
-        {
-            HttpContent content = FormContent(jquery);
-            FormDataCollection fd = content.ReadAsAsync<FormDataCollection>().Result;
-            T result = fd.ReadAs<T>();
-            return result;
+            // Assert
+            var arraySetter = Assert.Single(actual, kvp => kvp.Key == "x.z[20]");
+            Assert.Equal("cool", arraySetter.Value);
+
+            Assert.Single(actual, kvp => kvp.Key == "x.y" && kvp.Value == "30");
+            Assert.Single(actual, kvp => kvp.Key == "x.y" && kvp.Value == "70");
         }
 
         [Fact]
@@ -67,11 +74,6 @@ namespace System.Web.Http.ModelBinding
             int[] result = ParseJQuery<int[]>("=30");
 
             Assert.Equal(new int[] { 30 }, result);
-        }
-
-        public class ClassWithArrayField
-        {
-            public int[] x { get; set; }
         }
 
         [Fact]
@@ -177,7 +179,6 @@ namespace System.Web.Http.ModelBinding
             Assert.Equal(40, result.Data[1].Y);
         }
 
-        
         [Fact]
         public void ReadComplexNestedType()
         {
@@ -188,8 +189,6 @@ namespace System.Web.Http.ModelBinding
             Assert.Equal(3, result.P.X);
             Assert.Equal(4, result.P.Y);
         }
-
-
 
         class ComplexType2
         {
@@ -259,22 +258,231 @@ namespace System.Web.Http.ModelBinding
             Assert.Equal(0, result);
         }
 
-        class ThrowingSetterType
+        [Fact]
+        public void ReadForThrowingSetterTypeRecordsCorrectModelError()
+        {
+            HttpContent content = FormContent("Throws=text");
+            FormDataCollection formData = content.ReadAsAsync<FormDataCollection>().Result;
+            Mock<IFormatterLogger> mockLogger = new Mock<IFormatterLogger>();
+
+            formData.ReadAs<ThrowingSetterType>(String.Empty, requiredMemberSelector: null, formatterLogger: mockLogger.Object);
+            
+            mockLogger.Verify(mock => mock.LogError("Throws", ThrowingSetterType.Exception));
+        }
+
+        [Fact]
+        public void ReadAs_NullActionContextThrows()
+        {
+            // Arrange
+            HttpContent content = FormContent("=30");
+            FormDataCollection formData = content.ReadAsAsync<FormDataCollection>().Result;
+
+            // Act/Assert
+            Assert.Throws<ArgumentNullException>(() => formData.ReadAs<int>((HttpActionContext)null));
+        }
+
+        [Fact]
+        public void ReadAs_WithHttpActionContext()
+        {
+            // Arrange
+            int expected = 30;
+            HttpContent content = FormContent("=30");
+            FormDataCollection formData = content.ReadAsAsync<FormDataCollection>().Result;
+
+            using (HttpConfiguration configuration = new HttpConfiguration())
+            {
+                HttpActionContext actionContext = CreateActionContext(configuration);
+
+                // Act
+                int actual = formData.ReadAs<int>(actionContext);
+
+                // Assert
+                Assert.Equal<int>(expected, actual);
+            }
+        }
+
+        [Fact]
+        public void ReadAs_WithModelNameAndHttpActionContext()
+        {
+            // Arrange
+            int expected = 30;
+            HttpContent content = FormContent("a=30");
+            FormDataCollection formData = content.ReadAsAsync<FormDataCollection>().Result;
+
+            using (HttpConfiguration configuration = new HttpConfiguration())
+            {
+                HttpActionContext actionContext = CreateActionContext(configuration);
+
+                // Act
+                int actual = (int)formData.ReadAs(typeof(int), "a", actionContext);
+
+                // Assert
+                Assert.Equal<int>(expected, actual);
+            }
+        }
+
+        // This test verifies the user scenario behind codeplex-999 - ReadAs should take HttpActionContext
+        // as a parameter to make use of ModelBinders in the configuration.
+        [Fact]
+        public void Read_As_WithHttpActionContextAndCustomModelBinder()
+        {
+            // Arrange
+            int expected = 15;
+            HttpContent content = FormContent("a=30");
+            FormDataCollection formData = content.ReadAsAsync<FormDataCollection>().Result;
+
+            using (HttpConfiguration configuration = new HttpConfiguration())
+            {
+                configuration.Services.Insert(typeof(ModelBinderProvider), 0, new CustomIntModelBinderProvider());
+                
+                HttpActionContext actionContext = CreateActionContext(configuration);
+
+                // Act
+                int actual = (int)formData.ReadAs(typeof(int), "a", actionContext);
+
+                // Assert
+                Assert.Equal<int>(expected, actual);
+            }
+        }
+
+        // This test is to make sure that the ServicesConfigurationWrapper has not 
+        // altered HttpConfiguration.Services in any way
+        [Fact]
+        public void Read_As_NoServicesChangeInConfig()
+        {
+            // Arrange
+            HttpContent content = FormContent("a=30");
+            FormDataCollection formData = content.ReadAsAsync<FormDataCollection>().Result;
+
+            using (HttpConfiguration configuration = new HttpConfiguration())
+            {
+                // Act
+                HttpControllerSettings settings = new HttpControllerSettings(configuration);
+                HttpConfiguration clonedConfiguration = 
+                    HttpConfiguration.ApplyControllerSettings(settings, configuration);
+                int actual = (int)formData.ReadAs(typeof(int), "a", requiredMemberSelector: null, 
+                    formatterLogger: (new Mock<IFormatterLogger>()).Object, config: configuration);
+
+                // Assert
+                Assert.Equal<int>(30, actual);
+                Assert.Same(clonedConfiguration.Services, configuration.Services);
+            }
+        }
+
+        [Fact]
+        public void ServicesContainerWrapper_GetServices_Returns_RequiredModelValidatorProvider()
+        {
+            // Arrange
+            var requiredMemberModelValidatorProvider = 
+                new RequiredMemberModelValidatorProvider(requiredMemberSelector: null);
+            FormDataCollectionExtensions.ServicesContainerWrapper wrapper =
+                new FormDataCollectionExtensions.ServicesContainerWrapper(
+                    new HttpConfiguration(), requiredMemberModelValidatorProvider);
+
+            // Act
+            IEnumerable<object> services = wrapper.GetServices(typeof(ModelValidatorProvider));
+
+            // Assert
+            Assert.Same(requiredMemberModelValidatorProvider, services.ElementAt(0));
+        }
+
+        [Fact]
+        public void ServicesContainerWrapper_GetService_Returns_ModelValidatorCache()
+        {
+            // Arrange
+            FormDataCollectionExtensions.ServicesContainerWrapper wrapper =
+                new FormDataCollectionExtensions.ServicesContainerWrapper(
+                    new HttpConfiguration(), new RequiredMemberModelValidatorProvider(requiredMemberSelector: null));
+
+            // Act
+            object serviceInstance1 = wrapper.GetService(typeof(IModelValidatorCache));
+            object serviceInstance2 = wrapper.GetService(typeof(IModelValidatorCache));
+
+            // Assert
+            Assert.IsType<ModelValidatorCache>(serviceInstance1);
+            Assert.NotSame(serviceInstance1, serviceInstance2);
+        }
+
+        [Fact]
+        public void ServicesContainerWrapper_GetService_Returns_ModelValidatorProvider()
+        {
+            // Arrange
+            var requiredMemberModelValidatorProvider =
+                new RequiredMemberModelValidatorProvider(requiredMemberSelector: null);
+            FormDataCollectionExtensions.ServicesContainerWrapper wrapper =
+                new FormDataCollectionExtensions.ServicesContainerWrapper(
+                    new HttpConfiguration(), requiredMemberModelValidatorProvider);
+
+            // Act
+            object service = wrapper.GetService(typeof(ModelValidatorProvider));
+
+            // Assert
+            Assert.Equal(requiredMemberModelValidatorProvider, service);
+        }
+
+        private static HttpActionContext CreateActionContext(HttpConfiguration configuration)
+        {
+            HttpControllerContext controllerContext = new HttpControllerContext()
+            { 
+                Configuration = configuration,
+                ControllerDescriptor = new HttpControllerDescriptor(configuration),
+            };
+
+            return new HttpActionContext { ControllerContext = controllerContext };
+        }
+
+        private static HttpContent FormContent(string s)
+        {
+            HttpContent content = new StringContent(s);
+            content.Headers.ContentType = new MediaTypeHeaderValue("application/x-www-form-urlencoded");
+
+            return content;
+        }
+
+        private T ParseJQuery<T>(string jquery)
+        {
+            HttpContent content = FormContent(jquery);
+            FormDataCollection fd = content.ReadAsAsync<FormDataCollection>().Result;
+            T result = fd.ReadAs<T>();
+            return result;
+        }
+
+        private class CustomIntModelBinder : IModelBinder
+        {
+            public bool BindModel(HttpActionContext actionContext, ModelBindingContext bindingContext)
+            {
+                ValueProviderResult valueResult = bindingContext.ValueProvider.GetValue(bindingContext.ModelName);
+                int result = (int)valueResult.ConvertTo(typeof(int));
+
+                bindingContext.Model = result / 2;
+                return true;
+            }
+        }
+
+        private class CustomIntModelBinderProvider : ModelBinderProvider
+        {
+            public override IModelBinder GetBinder(HttpConfiguration configuration, Type modelType)
+            {
+                if (modelType == typeof(int))
+                {
+                    return new CustomIntModelBinder();
+                }
+                else
+                {
+                    return null;
+                }
+            }
+        }
+
+        private class ThrowingSetterType
         {
             public static Exception Exception = new Exception("This setter throws");
             public string Throws { get { return null; } set { throw Exception; } }
         }
 
-        [Fact]
-        public void ReadForThrowingSetterTypeRecordsCorrectModelError()
+        private class ClassWithArrayField
         {
-            HttpContent content = FormContent("Throws=text");
-            FormDataCollection fd = content.ReadAsAsync<FormDataCollection>().Result;
-            Mock<IFormatterLogger> mockLogger = new Mock<IFormatterLogger>();
-
-            fd.ReadAs<ThrowingSetterType>(String.Empty, requiredMemberSelector: null, formatterLogger: mockLogger.Object);
-            
-            mockLogger.Verify(mock => mock.LogError("Throws", ThrowingSetterType.Exception));
+            public int[] x { get; set; }
         }
     }
 }

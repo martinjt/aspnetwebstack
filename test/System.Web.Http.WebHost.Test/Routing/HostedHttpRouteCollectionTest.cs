@@ -5,7 +5,6 @@ using System.Collections.Specialized;
 using System.IO;
 using System.Net.Http;
 using System.Threading;
-using System.Web.Hosting;
 using System.Web.Http.Dispatcher;
 using System.Web.Http.Hosting;
 using System.Web.Http.Routing;
@@ -136,7 +135,7 @@ namespace System.Web.Http.WebHost.Routing
         public void GetRouteData_WithHttpContext_UnmatchedRoute_ReturnsNull()
         {
             var request = new HttpRequestMessage();
-            request.Properties[HttpControllerHandler.HttpContextBaseKey] = CreateHttpContext("~/api2");
+            request.SetHttpContext(CreateHttpContext("~/api2"));
             IHttpRoute route = _webApiRoutes.CreateRoute("api", null, null);
             _webApiRoutes.Add("default", route);
 
@@ -149,7 +148,7 @@ namespace System.Web.Http.WebHost.Routing
         public void GetRouteData_WithHttpContext_MatchedRoute_ReturnsRouteData()
         {
             var request = new HttpRequestMessage();
-            request.Properties[HttpControllerHandler.HttpContextBaseKey] = CreateHttpContext("~/api");
+            request.SetHttpContext(CreateHttpContext("~/api"));
             IHttpRoute route = _webApiRoutes.CreateRoute("api", null, null);
             _webApiRoutes.Add("default", route);
 
@@ -165,9 +164,9 @@ namespace System.Web.Http.WebHost.Routing
             var mockHandler = new Mock<HttpMessageHandler>();
             var config = new HttpConfiguration();
             var request = new HttpRequestMessage(HttpMethod.Get, "http://localhost/api/controllerName");
-            request.Properties[HttpPropertyKeys.HttpConfigurationKey] = config;
+            request.SetConfiguration(config);
             HttpDomainRoute domainRoute = new HttpDomainRoute("test", new { controller = "Values", action = "GetTenant" });
-            request.Properties[HttpPropertyKeys.HttpRouteDataKey] = new HostedHttpRouteData(domainRoute.GetRouteData(null));
+            request.SetRouteData(new HostedHttpRouteData(domainRoute.GetRouteData(null)));
             var dispatcher = new HttpRoutingDispatcher(config, defaultHandler: mockHandler.Object);
             var invoker = new HttpMessageInvoker(dispatcher);
 
@@ -188,12 +187,12 @@ namespace System.Web.Http.WebHost.Routing
         public void GetVirtualPath_ReturnsVirtualPathData()
         {
             var request = new HttpRequestMessage();
-            request.Properties[HttpControllerHandler.HttpContextBaseKey] = CreateHttpContext("~/api", "APP PATH MODIFIER RETURN VALUE");
+            request.SetHttpContext(CreateHttpContext("~/api", "APP PATH MODIFIER RETURN VALUE"));
             var config = new HttpConfiguration(_webApiRoutes);
             IHttpRoute route = _webApiRoutes.CreateRoute("api", null, null);
             _webApiRoutes.Add("default", route);
-            request.Properties[HttpPropertyKeys.HttpRouteDataKey] = _webApiRoutes.GetRouteData(request);
-            request.Properties[HttpPropertyKeys.HttpConfigurationKey] = config;
+            request.SetRouteData(_webApiRoutes.GetRouteData(request));
+            request.SetConfiguration(config);
 
             IHttpVirtualPathData result = _webApiRoutes.GetVirtualPath(request, null, new HttpRouteValueDictionary { { "httproute", true } });
 
@@ -274,7 +273,7 @@ namespace System.Web.Http.WebHost.Routing
                     {"httproute", true}
                 };
 
-            request.Properties[HttpPropertyKeys.HttpRouteDataKey] = new HttpRouteData(route, routeValues);
+            request.SetRouteData(new HttpRouteData(route, routeValues));
             
             // Act
             IHttpVirtualPathData httpvPathData = collection.GetVirtualPath(request, "domainRoute", routeValues);
@@ -284,11 +283,206 @@ namespace System.Web.Http.WebHost.Routing
             Assert.Equal("/api/controllerName/actionNameFromDomain", httpvPathData.VirtualPath);
         }
 
-        private static HttpRequestMessage CreateHttpRequestMessageWithContext()
+        [Fact]
+        public void IgnoreRoute_GetVirtualPathReturnsNull()
         {
-            HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Get, "http://localhost/api/controllerName/actionName");
-            request.Properties[HttpPropertyKeys.HttpConfigurationKey] = new HttpConfiguration();
-            request.Properties[HttpControllerHandler.HttpContextBaseKey] = CreateHttpContext("~/api");
+            // Arrange
+            DomainHttpRoute route = new DomainHttpRoute("myDomain", "api/{controller}/{action}", new { controller = "SomeValue", action = "SomeAction" });
+            HostedHttpRouteCollection collection = new HostedHttpRouteCollection(new RouteCollection());
+            collection.IgnoreRoute("domainRoute", route.RouteTemplate);
+            HttpRequestMessage request = CreateHttpRequestMessageWithContext();
+            HttpRouteValueDictionary routeValues = new HttpRouteValueDictionary()
+                {
+                    {"controller", "controllerName"},
+                    {"action", "actionName"},
+                    {"httproute", true}
+                };
+
+            request.SetRouteData(new HttpRouteData(route, routeValues));
+            
+            // Act
+            IHttpVirtualPathData httpvPathData = collection.GetVirtualPath(request, "domainRoute", routeValues);
+
+            // Assert
+            // Altough it contains the ignore route, GetVirtualPath from the ignored route will always return null.
+            Assert.Equal(collection.Count, 1);
+            Assert.Null(httpvPathData);
+        }
+
+        [Theory]
+        [InlineData("people/")]
+        [InlineData("people/1")]
+        [InlineData("people/literal")]
+        [InlineData("people/name?id=20")]
+        public void IgnoreRoute_GetSoft404IfRouteIgnored(string requestPath)
+        {
+            var request = CreateHttpRequestMessageWithContext(requestPath);
+
+            var response = SubmitRequest(request);
+
+            Assert.Equal(response.StatusCode, Net.HttpStatusCode.NotFound);
+            Assert.True(response.RequestMessage.Properties.ContainsKey(HttpPropertyKeys.NoRouteMatched));
+        }
+
+        [Fact]
+        public void CreateRoute_ValidatesConstraintType_IHttpRouteConstraint()
+        {
+            // Arrange
+            var routes = new MockHostedHttpRouteCollection(new RouteCollection());
+
+            var constraint = new CustomHttpConstraint();
+            var constraints = new HttpRouteValueDictionary();
+            constraints.Add("custom", constraint);
+
+            // Act
+            var route = routes.CreateRoute("{controller}/{id}", null, constraints);
+
+            // Assert
+            Assert.NotNull(route.Constraints["custom"]);
+
+            Assert.Equal(1, routes.TimesValidateConstraintCalled);
+        }
+
+        [Fact]
+        public void CreateRoute_ValidatesConstraintType_IRouteConstraint()
+        {
+            // Arrange
+            var routes = new MockHostedHttpRouteCollection(new RouteCollection());
+
+            var constraint = new CustomConstraint();
+            var constraints = new HttpRouteValueDictionary();
+            constraints.Add("custom", constraint);
+
+            // Act
+            var route = routes.CreateRoute("{controller}/{id}", null, constraints);
+
+            // Assert
+            Assert.NotNull(route.Constraints["custom"]);
+            Assert.Equal(1, routes.TimesValidateConstraintCalled);
+        }
+
+        [Fact]
+        public void CreateRoute_ValidatesConstraintType_StringRegex()
+        {
+            // Arrange
+            var routes = new MockHostedHttpRouteCollection(new RouteCollection());
+
+            var constraint = "product|products";
+            var constraints = new HttpRouteValueDictionary();
+            constraints.Add("custom", constraint);
+
+            // Act
+            var route = routes.CreateRoute("{controller}/{id}", null, constraints);
+
+            // Assert
+            Assert.NotNull(route.Constraints["custom"]);
+            Assert.Equal(1, routes.TimesValidateConstraintCalled);
+        }
+
+        [Fact]
+        public void CreateRoute_ValidatesConstraintType_InvalidType()
+        {
+            // Arrange
+            var routes = new HostedHttpRouteCollection(new RouteCollection());
+
+            var constraint = new Uri("http://localhost/");
+            var constraints = new HttpRouteValueDictionary();
+            constraints.Add("custom", constraint);
+
+            string expectedMessage =
+                "The constraint entry 'custom' on the route with route template '{controller}/{id}' " +
+                "must have a string value or be of a type which implements 'System.Web.Http.Routing.IHttpRouteConstraint' or 'System.Web.Routing.IRouteConstraint'.";
+
+            // Act & Assert
+            Assert.Throws<InvalidOperationException>(() => routes.CreateRoute("{controller}/{id}", null, constraints), expectedMessage);
+        }
+
+        [Theory]
+        [InlineData("values/10")]
+        [InlineData("values/15")]
+        [InlineData("values/20")]
+        public void IgnoreRoute_WithConstraints_GetSoft404IfRouteIgnored(string requestPath)
+        {
+            HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Get, "http://localhost/constraint/" + requestPath);
+            request.SetConfiguration(new HttpConfiguration());
+            request.SetHttpContext(CreateHttpContext("~/constraint"));
+
+            var response = SubmitRequest(request);
+
+            Assert.Equal(response.StatusCode, Net.HttpStatusCode.NotFound);
+            Assert.True(response.RequestMessage.Properties.ContainsKey(HttpPropertyKeys.NoRouteMatched));
+        }
+
+        [Theory]
+        [InlineData("values/1")]
+        [InlineData("values/25")]
+        [InlineData("values/40")]
+        public void IgnoreRoute_WithConstraints_GetValueIfNotIgnored(string requestPath)
+        {
+            HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Get, "http://localhost/constraint/" + requestPath);
+            request.SetConfiguration(new HttpConfiguration());
+            request.SetHttpContext(CreateHttpContext("~/constraint"));
+
+            var response = SubmitRequest(request);
+
+            Assert.Equal(response.StatusCode, Net.HttpStatusCode.OK);
+            Assert.Equal(String.Concat("values/", response.Content.ReadAsStringAsync().Result), requestPath);
+        }
+
+        public class CustomIgnoreRouteConstraint : IHttpRouteConstraint
+        {
+            public bool Match(HttpRequestMessage request, IHttpRoute route, string parameterName,
+                IDictionary<string, object> values, HttpRouteDirection routeDirection)
+            {
+                long id;
+                if (values.ContainsKey("id")
+                    && Int64.TryParse(values["id"].ToString(), out id)
+                    && (id == 10 || id == 15 || id == 20))
+                {
+                    return true;
+                }
+
+                return false;
+            }
+        }
+
+        private static HttpResponseMessage SubmitRequest(HttpRequestMessage request)
+        {
+            HttpConfiguration config = new HttpConfiguration(new HostedHttpRouteCollection(new RouteCollection()));
+            config.Routes.IgnoreRoute("Bar", "api/{*pathInfo}");
+            config.Routes.IgnoreRoute("Constraints", "constraint/values/{id}", constraints: new { constraint = new CustomIgnoreRouteConstraint() });
+            config.Routes.MapHttpRoute("DefaultApi", "api/{controller}/{action}");
+            config.MapHttpAttributeRoutes();
+
+            HttpServer server = new HttpServer(config);
+            using (HttpMessageInvoker client = new HttpMessageInvoker(server))
+            {
+                return client.SendAsync(request, CancellationToken.None).Result;
+            }
+        }
+
+        [RoutePrefix("constraint")]
+        public class IgnoreRouteWithConstraintsTestController : ApiController
+        {
+            [Route("values/{id:int}")]
+            public int Get(int id)
+            {
+               return id;
+            }
+        }
+
+        private static T GetContentValue<T>(HttpResponseMessage response)
+        {
+            T value;
+            response.TryGetContentValue<T>(out value);
+            return value;
+        }
+
+        private static HttpRequestMessage CreateHttpRequestMessageWithContext(string requestPath = "controllerName/actionName")
+        {
+            HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Get, "http://localhost/api/" + requestPath);
+            request.SetConfiguration(new HttpConfiguration());
+            request.SetHttpContext(CreateHttpContext("~/api"));
 
             return request;
         }
@@ -367,5 +561,40 @@ namespace System.Web.Http.WebHost.Routing
             }
         }
 
+        private class CustomHttpConstraint : IHttpRouteConstraint
+        {
+            public bool Match(HttpRequestMessage request, IHttpRoute route, string parameterName, IDictionary<string, object> values, HttpRouteDirection routeDirection)
+            {
+                throw new NotImplementedException();
+            }
+        }
+
+        private class CustomConstraint : IRouteConstraint
+        {
+            public bool Match(HttpContextBase httpContext, Route route, string parameterName, RouteValueDictionary values, RouteDirection routeDirection)
+            {
+                throw new NotImplementedException();
+            }
+        }
+
+        private class MockHostedHttpRouteCollection : HostedHttpRouteCollection
+        {
+            public MockHostedHttpRouteCollection(RouteCollection routes)
+                : base(routes)
+            {
+            }
+
+            public int TimesValidateConstraintCalled
+            {
+                get;
+                private set;
+            }
+
+            protected override void ValidateConstraint(string routeTemplate, string name, object constraint)
+            {
+                TimesValidateConstraintCalled++;
+                base.ValidateConstraint(routeTemplate, name, constraint);
+            }
+        }
     }
 }

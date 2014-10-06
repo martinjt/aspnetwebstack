@@ -6,6 +6,7 @@ using System.Collections.ObjectModel;
 using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Contracts;
 using System.Net.Http;
+using System.Web.Http.Controllers;
 using System.Web.Http.Properties;
 using System.Web.Http.Routing;
 
@@ -17,7 +18,7 @@ namespace System.Web.Http
         private static readonly Uri _referenceBaseAddress = new Uri("http://localhost");
 
         private readonly string _virtualPathRoot;
-        private readonly Collection<IHttpRoute> _collection = new Collection<IHttpRoute>();
+        private readonly List<IHttpRoute> _collection = new List<IHttpRoute>();
         private readonly IDictionary<string, IHttpRoute> _dictionary = new Dictionary<string, IHttpRoute>(StringComparer.OrdinalIgnoreCase);
         private bool _disposed;
 
@@ -40,7 +41,7 @@ namespace System.Web.Http
 
             // Validate virtual path
             Uri address = new Uri(_referenceBaseAddress, virtualPathRoot);
-            _virtualPathRoot = address.AbsolutePath;
+            _virtualPathRoot = "/" + address.GetComponents(UriComponents.Path, UriFormat.Unescaped);
         }
 
         public virtual string VirtualPathRoot
@@ -75,9 +76,10 @@ namespace System.Web.Http
                 throw Error.ArgumentNull("request");
             }
 
-            foreach (IHttpRoute route in _collection)
+            for (int i = 0; i < _collection.Count; i++)
             {
-                IHttpRouteData routeData = route.GetRouteData(_virtualPathRoot, request);
+                string virtualPathRoot = GetVirtualPathRoot(request.GetRequestContext());
+                IHttpRouteData routeData = _collection[i].GetRouteData(virtualPathRoot, request);
                 if (routeData != null)
                 {
                     return routeData;
@@ -111,8 +113,7 @@ namespace System.Web.Http
             }
 
             // Construct a new VirtualPathData with the resolved app path
-
-            string virtualPathRoot = _virtualPathRoot;
+            string virtualPathRoot = GetVirtualPathRoot(request.GetRequestContext());
             if (!virtualPathRoot.EndsWith("/", StringComparison.Ordinal))
             {
                 virtualPathRoot += "/";
@@ -121,6 +122,18 @@ namespace System.Web.Http
             // Note: The virtual path root here always ends with a "/" and the
             // virtual path never starts with a "/" (that's how routes work).
             return new HttpVirtualPathData(virtualPath.Route, virtualPathRoot + virtualPath.VirtualPath);
+        }
+
+        // Returns the virtual path root on the request context if present
+        // Otherwise, fall back on the virtual path root for the route collection
+        private string GetVirtualPathRoot(HttpRequestContext requestContext)
+        {
+            if (requestContext != null)
+            {
+                return requestContext.VirtualPathRoot ?? String.Empty;
+            }
+
+            return _virtualPathRoot;
         }
 
         public IHttpRoute CreateRoute(string routeTemplate, object defaults, object constraints)
@@ -140,7 +153,39 @@ namespace System.Web.Http
             HttpRouteValueDictionary routeDefaults = new HttpRouteValueDictionary(defaults);
             HttpRouteValueDictionary routeConstraints = new HttpRouteValueDictionary(constraints);
             HttpRouteValueDictionary routeDataTokens = new HttpRouteValueDictionary(dataTokens);
+
+            foreach (var constraint in routeConstraints)
+            {
+                ValidateConstraint(routeTemplate, constraint.Key, constraint.Value);
+            }
+
             return new HttpRoute(routeTemplate, routeDefaults, routeConstraints, routeDataTokens, handler);
+        }
+
+        /// <summary>
+        /// Validates that a constraint is valid for an <see cref="IHttpRoute"/> created by a call
+        /// to the <see cref="HttpRouteCollection.CreateRoute(string, IDictionary&lt;string, object&gt;, IDictionary&lt;string, object&gt;, IDictionary&lt;string, object&gt;, HttpMessageHandler)"/> method.
+        /// </summary>
+        /// <param name="routeTemplate">The route template.</param>
+        /// <param name="name">The constraint name.</param>
+        /// <param name="constraint">The constraint object.</param>
+        /// <remarks>
+        /// Implement this method when deriving from <see cref="HttpRouteCollection"/> to allow contraints of
+        /// types other than <see cref="string"/> and <see cref="IHttpRouteConstraint"/>.
+        /// </remarks>
+        protected virtual void ValidateConstraint(string routeTemplate, string name, object constraint)
+        {
+            if (name == null)
+            {
+                throw Error.ArgumentNull("name");
+            }
+
+            if (constraint == null)
+            {
+                throw Error.ArgumentNull("constraint");
+            }
+
+            HttpRoute.ValidateConstraint(routeTemplate, name, constraint);
         }
 
         void ICollection<IHttpRoute>.Add(IHttpRoute route)
@@ -274,6 +319,24 @@ namespace System.Web.Http
         {
             if (!_disposed)
             {
+                if (disposing)
+                {
+                    // Creating a collection to avoid double-disposing any handlers that are shared between routes
+                    HashSet<IDisposable> handlers = new HashSet<IDisposable>();
+                    foreach (var route in this)
+                    {
+                        if (route.Handler != null)
+                        {
+                            handlers.Add(route.Handler);
+                        }
+                    }
+
+                    foreach (var handler in handlers)
+                    {
+                        handler.Dispose();
+                    }
+                }
+
                 _disposed = true;
             }
         }

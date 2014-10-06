@@ -22,51 +22,62 @@ namespace System.Web.Http.Routing
         /// Key used to signify that a route URL generation request should include HTTP routes (e.g. Web API).
         /// If this key is not specified then no HTTP routes will match.
         /// </summary>
-        internal const string HttpRouteKey = "httproute";
+        public static readonly string HttpRouteKey = "httproute";
 
-        private const string HttpMethodParameterName = "httpMethod";
+        internal const string RoutingContextKey = "MS_RoutingContext";
 
         private string _routeTemplate;
-        private HttpParsedRoute _parsedRoute;
         private HttpRouteValueDictionary _defaults;
         private HttpRouteValueDictionary _constraints;
         private HttpRouteValueDictionary _dataTokens;
 
         public HttpRoute()
-            : this(routeTemplate: null, defaults: null, constraints: null, dataTokens: null, handler: null)
+            : this(routeTemplate: null, defaults: null, constraints: null, dataTokens: null, handler: null, parsedRoute: null)
         {
         }
 
         public HttpRoute(string routeTemplate)
-            : this(routeTemplate, defaults: null, constraints: null, dataTokens: null, handler: null)
+            : this(routeTemplate, defaults: null, constraints: null, dataTokens: null, handler: null, parsedRoute: null)
         {
         }
 
         public HttpRoute(string routeTemplate, HttpRouteValueDictionary defaults)
-            : this(routeTemplate, defaults, constraints: null, dataTokens: null, handler: null)
+            : this(routeTemplate, defaults, constraints: null, dataTokens: null, handler: null, parsedRoute: null)
         {
         }
 
         public HttpRoute(string routeTemplate, HttpRouteValueDictionary defaults, HttpRouteValueDictionary constraints)
-            : this(routeTemplate, defaults, constraints, dataTokens: null, handler: null)
+            : this(routeTemplate, defaults, constraints, dataTokens: null, handler: null, parsedRoute: null)
         {
         }
 
         public HttpRoute(string routeTemplate, HttpRouteValueDictionary defaults, HttpRouteValueDictionary constraints, HttpRouteValueDictionary dataTokens)
-            : this(routeTemplate, defaults, constraints, dataTokens, handler: null)
+            : this(routeTemplate, defaults, constraints, dataTokens, handler: null, parsedRoute: null)
         {
         }
 
         public HttpRoute(string routeTemplate, HttpRouteValueDictionary defaults, HttpRouteValueDictionary constraints, HttpRouteValueDictionary dataTokens, HttpMessageHandler handler)
+            : this(routeTemplate, defaults, constraints, dataTokens, handler, parsedRoute: null)
         {
-            _routeTemplate = String.IsNullOrWhiteSpace(routeTemplate) ? String.Empty : routeTemplate;
+        }
+
+        internal HttpRoute(string routeTemplate, HttpRouteValueDictionary defaults, HttpRouteValueDictionary constraints, HttpRouteValueDictionary dataTokens, HttpMessageHandler handler, HttpParsedRoute parsedRoute)
+        {
+            _routeTemplate = routeTemplate == null ? String.Empty : routeTemplate;
             _defaults = defaults ?? new HttpRouteValueDictionary();
             _constraints = constraints ?? new HttpRouteValueDictionary();
             _dataTokens = dataTokens ?? new HttpRouteValueDictionary();
             Handler = handler;
 
-            // The parser will throw for invalid routes. 
-            _parsedRoute = HttpRouteParser.Parse(RouteTemplate);
+            if (parsedRoute == null)
+            {
+                // The parser will throw for invalid routes.
+                ParsedRoute = RouteParser.Parse(routeTemplate);
+            }
+            else
+            {
+                ParsedRoute = parsedRoute;
+            }
         }
 
         public IDictionary<string, object> Defaults
@@ -91,6 +102,8 @@ namespace System.Web.Http.Routing
             get { return _routeTemplate; }
         }
 
+        internal HttpParsedRoute ParsedRoute { get; private set; }
+
         public virtual IHttpRouteData GetRouteData(string virtualPathRoot, HttpRequestMessage request)
         {
             if (virtualPathRoot == null)
@@ -103,26 +116,13 @@ namespace System.Web.Http.Routing
                 throw Error.ArgumentNull("request");
             }
 
-            // Note: we don't validate host/port as this is expected to be done at the host level
-            string requestPath = request.RequestUri.AbsolutePath;
-            if (!requestPath.StartsWith(virtualPathRoot, StringComparison.OrdinalIgnoreCase))
+            RoutingContext context = GetOrCreateRoutingContext(virtualPathRoot, request);
+            if (!context.IsValid)
             {
                 return null;
             }
 
-            string relativeRequestPath = null;
-            int virtualPathLength = virtualPathRoot.Length;
-            if (requestPath.Length > virtualPathLength && requestPath[virtualPathLength] == '/')
-            {
-                relativeRequestPath = requestPath.Substring(virtualPathLength + 1);
-            }
-            else
-            {
-                relativeRequestPath = requestPath.Substring(virtualPathLength);
-            }
-
-            string decodedRelativeRequestPath = UriQueryUtility.UrlDecode(relativeRequestPath);
-            HttpRouteValueDictionary values = _parsedRoute.Match(decodedRelativeRequestPath, _defaults);
+            HttpRouteValueDictionary values = ParsedRoute.Match(context, _defaults);
             if (values == null)
             {
                 // If we got back a null value set, that means the URI did not match
@@ -136,6 +136,47 @@ namespace System.Web.Http.Routing
             }
 
             return new HttpRouteData(this, values);
+        }
+
+        private static RoutingContext GetOrCreateRoutingContext(string virtualPathRoot, HttpRequestMessage request)
+        {
+            RoutingContext context;
+            if (!request.Properties.TryGetValue<RoutingContext>(RoutingContextKey, out context))
+            {
+                context = CreateRoutingContext(virtualPathRoot, request);
+                request.Properties[RoutingContextKey] = context;
+            }
+
+            return context;
+        }
+
+        private static RoutingContext CreateRoutingContext(string virtualPathRoot, HttpRequestMessage request)
+        {
+            // Note: we don't validate host/port as this is expected to be done at the host level
+            string requestPath = "/" + request.RequestUri.GetComponents(UriComponents.Path, UriFormat.Unescaped);
+
+            // This code is optimized for the common path being an exact case match on the virtual path string.
+            // An Ordinal (case-sensitive) comparison is significantly faster than OrdinalIgnoreCase.
+            if (!requestPath.StartsWith(virtualPathRoot, StringComparison.Ordinal))
+            {
+                if (!requestPath.StartsWith(virtualPathRoot, StringComparison.OrdinalIgnoreCase))
+                {
+                    return RoutingContext.Invalid();
+                }
+            }
+
+            string relativeRequestPath = null;
+            int virtualPathLength = virtualPathRoot.Length;
+            if (requestPath.Length > virtualPathLength && requestPath[virtualPathLength] == '/')
+            {
+                relativeRequestPath = requestPath.Substring(virtualPathLength + 1);
+            }
+            else
+            {
+                relativeRequestPath = requestPath.Substring(virtualPathLength);
+            }
+
+            return RoutingContext.Valid(RouteParser.SplitUriToPathSegmentStrings(relativeRequestPath));
         }
 
         /// <summary>
@@ -164,12 +205,9 @@ namespace System.Web.Http.Routing
             var newValues = GetRouteDictionaryWithoutHttpRouteKey(values);
 
             IHttpRouteData routeData = request.GetRouteData();
-            if (routeData == null)
-            {
-                return null;
-            }
+            IDictionary<string, object> requestValues = routeData == null ? null : routeData.Values;
 
-            BoundRouteTemplate result = _parsedRoute.Bind(routeData.Values, newValues, _defaults, _constraints);
+            BoundRouteTemplate result = ParsedRoute.Bind(requestValues, newValues, _defaults, _constraints);
             if (result == null)
             {
                 return null;
@@ -186,7 +224,7 @@ namespace System.Web.Http.Routing
 
         private static IDictionary<string, object> GetRouteDictionaryWithoutHttpRouteKey(IDictionary<string, object> routeValues)
         {
-            var newRouteValues = new Dictionary<string, object>();
+            var newRouteValues = new HttpRouteValueDictionary();
             if (routeValues != null)
             {
                 foreach (var routeValue in routeValues)
@@ -236,6 +274,33 @@ namespace System.Web.Http.Routing
             }
 
             return true;
+        }
+
+        // Validates that a constraint is of a type that HttpRoute can process. This is not valid to
+        // call when a route implements IHttpRoute or inherits from HttpRoute - as the derived class can handle
+        // any types of constraints it wants to support.
+        internal static void ValidateConstraint(string routeTemplate, string name, object constraint)
+        {
+            if (constraint is IHttpRouteConstraint)
+            {
+                return;
+            }
+
+            if (constraint is string)
+            {
+                return;
+            }
+
+            throw CreateInvalidConstraintTypeException(routeTemplate, name);
+        }
+
+        private static Exception CreateInvalidConstraintTypeException(string routeTemplate, string name)
+        {
+            return Error.InvalidOperation(
+                SRResources.Route_ValidationMustBeStringOrCustomConstraint,
+                name,
+                routeTemplate,
+                typeof(IHttpRouteConstraint).FullName);
         }
     }
 }

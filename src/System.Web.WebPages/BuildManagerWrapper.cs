@@ -3,6 +3,8 @@
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using System.Diagnostics.Contracts;
+using System.IO;
 using System.Linq;
 using System.Web.Caching;
 using System.Web.Compilation;
@@ -24,24 +26,33 @@ namespace System.Web.WebPages
         internal static readonly Guid KeyGuid = Guid.NewGuid();
         private static readonly TimeSpan _objectFactoryCacheDuration = TimeSpan.FromMinutes(1);
         private readonly IVirtualPathUtility _virtualPathUtility;
-        private readonly VirtualPathProvider _vpp;
+        private readonly Func<VirtualPathProvider> _vppFunc;
         private readonly bool _isPrecompiled;
         private readonly FileExistenceCache _vppCache;
         private IEnumerable<string> _supportedExtensions;
 
         public BuildManagerWrapper()
-            : this(HostingEnvironment.VirtualPathProvider, new VirtualPathUtilityWrapper())
+            : this(() => HostingEnvironment.VirtualPathProvider, new VirtualPathUtilityWrapper())
         {
         }
 
         public BuildManagerWrapper(VirtualPathProvider vpp, IVirtualPathUtility virtualPathUtility)
+            : this(() => vpp, virtualPathUtility)
         {
-            _vpp = vpp;
+            Contract.Assert(vpp != null);
+        }
+
+        public BuildManagerWrapper(Func<VirtualPathProvider> vppFunc, IVirtualPathUtility virtualPathUtility)
+        {
+            Contract.Assert(vppFunc != null);
+            Contract.Assert(virtualPathUtility != null);
+
+            _vppFunc = vppFunc;
             _virtualPathUtility = virtualPathUtility;
             _isPrecompiled = IsNonUpdatablePrecompiledApp();
             if (!_isPrecompiled)
             {
-                _vppCache = new FileExistenceCache(vpp);
+                _vppCache = new FileExistenceCache(vppFunc);
             }
         }
 
@@ -65,6 +76,17 @@ namespace System.Web.WebPages
             return ExistsInVpp(virtualPath);
         }
 
+        internal bool IsNonUpdatablePrecompiledApp()
+        {
+            VirtualPathProvider vpp = _vppFunc();
+            // VirtualPathProvider currently null in some test scenarios e.g. PreApplicationStartCodeTest.StartTest
+            if (vpp == null)
+            {
+                return false;
+            }
+            return IsNonUpdateablePrecompiledApp(vpp, _virtualPathUtility);
+        }
+
         /// <summary>
         /// An app's is precompiled for our purposes if 
         /// (a) it has a PreCompiledApp.config file in the site root, 
@@ -75,24 +97,20 @@ namespace System.Web.WebPages
         /// </remarks>
         [SuppressMessage("Microsoft.Design", "CA1031:DoNotCatchGeneralExceptionTypes",
             Justification = "We want to replicate the behavior of BuildManager which catches all exceptions.")]
-        internal bool IsNonUpdatablePrecompiledApp()
+        internal static bool IsNonUpdateablePrecompiledApp(VirtualPathProvider vpp, IVirtualPathUtility virtualPathUtility)
         {
-            if (_vpp == null)
-            {
-                return false;
-            }
-            var virtualPath = _virtualPathUtility.ToAbsolute("~/PrecompiledApp.config");
-            if (!_vpp.FileExists(virtualPath))
+            var virtualPath = virtualPathUtility.ToAbsolute("~/PrecompiledApp.config");
+            if (!vpp.FileExists(virtualPath))
             {
                 return false;
             }
 
             XDocument document;
-            using (var stream = _vpp.GetFile(virtualPath).Open())
+            using (Stream stream = vpp.GetFile(virtualPath).Open())
             {
                 try
                 {
-                    document = XDocument.Load(_vpp.GetFile(virtualPath).Open());
+                    document = XDocument.Load(stream);
                 }
                 catch
                 {

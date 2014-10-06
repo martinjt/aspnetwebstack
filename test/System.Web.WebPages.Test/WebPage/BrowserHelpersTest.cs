@@ -219,7 +219,7 @@ namespace System.Web.WebPages.Test
         }
 
         [Fact]
-        public void GetVaryByCustomStringVariesBySetOverriddenBrowserMobile()
+        public void GetOverriddenBrowserVariesBySetOverriddenBrowserMobile()
         {
             // Arrange
             Mock<HttpContextBase> context = CookieBrowserOverrideStoreTest.CreateCookieContext();
@@ -228,13 +228,13 @@ namespace System.Web.WebPages.Test
             context.Setup(c => c.Request.Browser).Returns(currentBrowser.Object);
 
             // Act
-            string originalBrowserType = context.Object.GetVaryByCustomStringForOverriddenBrowser(CreateBrowserThroughFactory);
+            string originalBrowserType = GetOverriddenBrowserType(context.Object, CreateBrowserThroughFactory);
 
             context.Object.SetOverriddenBrowser(BrowserOverride.Desktop);
-            string deskTopBrowserType = context.Object.GetVaryByCustomStringForOverriddenBrowser(CreateBrowserThroughFactory);
+            string deskTopBrowserType = GetOverriddenBrowserType(context.Object, CreateBrowserThroughFactory);
 
             context.Object.SetOverriddenBrowser(BrowserOverride.Mobile);
-            string mobileBrowserType = context.Object.GetVaryByCustomStringForOverriddenBrowser(CreateBrowserThroughFactory);
+            string mobileBrowserType = GetOverriddenBrowserType(context.Object, CreateBrowserThroughFactory);
 
             // Assert
             Assert.Equal(originalBrowserType, mobileBrowserType);
@@ -243,7 +243,7 @@ namespace System.Web.WebPages.Test
         }
 
         [Fact]
-        public void GetVaryByCustomStringVariesBySetOverriddenBrowserDesktop()
+        public void GetOverriddenBrowserVariesBySetOverriddenBrowserDesktop()
         {
             // Arrange
             Mock<HttpContextBase> context = CookieBrowserOverrideStoreTest.CreateCookieContext();
@@ -252,18 +252,44 @@ namespace System.Web.WebPages.Test
             context.Setup(c => c.Request.Browser).Returns(currentBrowser.Object);
 
             // Act
-            string originalBrowserType = context.Object.GetVaryByCustomStringForOverriddenBrowser(CreateBrowserThroughFactory);
+            string originalBrowserType = GetOverriddenBrowserType(context.Object, CreateBrowserThroughFactory);
 
             context.Object.SetOverriddenBrowser(BrowserOverride.Mobile);
-            string mobileBrowserType = context.Object.GetVaryByCustomStringForOverriddenBrowser(CreateBrowserThroughFactory);
+            string mobileBrowserType = GetOverriddenBrowserType(context.Object, CreateBrowserThroughFactory);
 
             context.Object.SetOverriddenBrowser(BrowserOverride.Desktop);
-            string deskTopBrowserType = context.Object.GetVaryByCustomStringForOverriddenBrowser(CreateBrowserThroughFactory);
+            string deskTopBrowserType = GetOverriddenBrowserType(context.Object, CreateBrowserThroughFactory);
 
             // Assert
             Assert.NotEqual(originalBrowserType, mobileBrowserType);
             Assert.Equal(originalBrowserType, deskTopBrowserType);
             Assert.NotEqual(mobileBrowserType, deskTopBrowserType);
+        }
+
+        [Fact]
+        public void GetOverriddenBrowser_OverridenUserAgentMatchingIsCaseInsensitive()
+        {
+            // Arrange
+            string mobileUserAgent = "Mozilla/5.0 (iPhone; U; CPU iPhone OS 3_0 like Mac OS X; en-us) AppleWebKit/528.18 (KHTML, like Gecko) Version/4.0 Mobile/7A341 Safari/528.16";
+            string mobileUserAgentLowerCase = mobileUserAgent.ToLowerInvariant();
+
+            HttpCookie existingOverrideCookie = new HttpCookie(CookieBrowserOverrideStore.BrowserOverrideCookieName, mobileUserAgent);
+            HttpContextBase context = CookieBrowserOverrideStoreTest.CreateCookieContext(requestCookie: existingOverrideCookie).Object;
+            Mock.Get(context).Setup(c => c.Request.UserAgent).Returns(mobileUserAgent);
+            Mock.Get(context).Setup(c => c.Request.Browser).Returns(new HttpBrowserCapabilitiesWrapper(new HttpBrowserCapabilities()));
+
+            // this will set the overriden user agent
+            context.SetOverriddenBrowser(mobileUserAgentLowerCase);
+
+            // overriden browser is only created if the overriden userAgent is different from the request's user agent
+            bool overridenBrowserWasCreated = false;
+
+            // Act
+            var overriden = context.GetOverriddenBrowser(x => { overridenBrowserWasCreated = true; return null; });
+
+            // Assert
+            Assert.False(overridenBrowserWasCreated);
+            Assert.Same(context.Request.Browser, overriden);
         }
 
         // We need to call the .ctor of SimpleWorkerRequest that depends on HttpRuntime so for unit testing
@@ -282,6 +308,11 @@ namespace System.Web.WebPages.Test
             factory.ConfigureBrowserCapabilities(new NameValueCollection(), browser);
 
             return new HttpBrowserCapabilitiesWrapper(browser);
+        }
+
+        private static string GetOverriddenBrowserType(HttpContextBase context, Func<string, HttpBrowserCapabilitiesBase> factory)
+        {
+            return context.GetOverriddenBrowser(factory).Type;
         }
     }
 }

@@ -1087,6 +1087,55 @@ namespace System.Web.Mvc.Test
             Assert.Equal(expectedUnformattedDate, htmlHelper.EvalString("date"));
         }
 
+
+        [Fact]
+        public void ObjectToDictionaryWithAnonymousTypeLooksUpProperties()
+        {
+            // Arrange
+            object obj = new { _test = "value", oth_er = 1 };
+
+            // Act
+            IDictionary<string, object> dictValues = HtmlHelper.ObjectToDictionary(obj);
+
+            // Assert
+            Assert.NotNull(dictValues);
+            Assert.Equal(2, dictValues.Count);
+            Assert.Equal("value", dictValues["_test"]);
+            Assert.Equal(1, dictValues["oth_er"]);
+        }
+
+        // SetValidationSummaryMessageElement
+
+        [Fact]
+        public void SetValidationSummaryMessageElement()
+        {
+            // Arrange
+            var mockViewContext = new Mock<ViewContext>();
+            var viewDataContainer = new Mock<IViewDataContainer>().Object;
+            var htmlHelper = new HtmlHelper(mockViewContext.Object, viewDataContainer);
+
+            // Act
+            htmlHelper.SetValidationSummaryMessageElement("label");
+
+            // Act & assert
+            mockViewContext.VerifySet(vc => vc.ValidationSummaryMessageElement = "label");
+        }
+
+        [Fact]
+        public void SetValidationMessageElement()
+        {
+            // Arrange
+            var mockViewContext = new Mock<ViewContext>();
+            var viewDataContainer = new Mock<IViewDataContainer>().Object;
+            var htmlHelper = new HtmlHelper(mockViewContext.Object, viewDataContainer);
+
+            // Act
+            htmlHelper.SetValidationMessageElement("label");
+
+            // Act & assert
+            mockViewContext.VerifySet(vc => vc.ValidationMessageElement = "label");
+        }
+
         private class ObjectWithWrapperMarkup
         {
             public override string ToString()
@@ -1109,29 +1158,6 @@ namespace System.Web.Mvc.Test
         internal static ValueProviderResult GetValueProviderResult(object rawValue, string attemptedValue)
         {
             return new ValueProviderResult(rawValue, attemptedValue, CultureInfo.InvariantCulture);
-        }
-
-        internal static IDisposable ReplaceCulture(string currentCulture, string currentUICulture)
-        {
-            CultureInfo newCulture = CultureInfo.GetCultureInfo(currentCulture);
-            CultureInfo newUICulture = CultureInfo.GetCultureInfo(currentUICulture);
-            CultureInfo originalCulture = Thread.CurrentThread.CurrentCulture;
-            CultureInfo originalUICulture = Thread.CurrentThread.CurrentUICulture;
-            Thread.CurrentThread.CurrentCulture = newCulture;
-            Thread.CurrentThread.CurrentUICulture = newUICulture;
-            return new CultureReplacement { OriginalCulture = originalCulture, OriginalUICulture = originalUICulture };
-        }
-
-        private class CultureReplacement : IDisposable
-        {
-            public CultureInfo OriginalCulture;
-            public CultureInfo OriginalUICulture;
-
-            public void Dispose()
-            {
-                Thread.CurrentThread.CurrentCulture = OriginalCulture;
-                Thread.CurrentThread.CurrentUICulture = OriginalUICulture;
-            }
         }
 
         private class TestableHtmlHelper : HtmlHelper

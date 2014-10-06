@@ -1,31 +1,32 @@
 ﻿// Copyright (c) Microsoft Open Technologies, Inc. All rights reserved. See License.txt in the project root for license information.
 
-using System.Collections.Specialized;
 using System.Diagnostics.CodeAnalysis;
-using Microsoft.Web.Infrastructure.DynamicValidationHelper;
 
 namespace System.Web.Helpers
 {
+    [Obsolete("Use System.Web.HttpRequest.Unvalidated instead.")]
     public static class Validation
     {
         [SuppressMessage("Microsoft.Usage", "CA1801:ReviewUnusedParameters", MessageId = "request",
             Justification = "Parameter is only meant for making this show up as 'Request.Unvalidated()', which closely resembles FX45 syntax.")]
+#pragma warning disable 0618 // Obsolete System.Web.Helpers.UnvalidatedRequestValues
         public static UnvalidatedRequestValues Unvalidated(this HttpRequestBase request)
+#pragma warning restore
         {
             return Unvalidated((HttpRequest)null);
         }
 
         [SuppressMessage("Microsoft.Usage", "CA1801:ReviewUnusedParameters", MessageId = "request",
             Justification = "Parameter is only meant for making this show up as 'Request.Unvalidated()', which closely resembles FX45 syntax.")]
+#pragma warning disable 0618 // Obsolete System.Web.Helpers.UnvalidatedRequestValues
         public static UnvalidatedRequestValues Unvalidated(this HttpRequest request)
+#pragma warning restore
         {
             // We don't actually need the request object; we'll get HttpContext.Current directly.
             HttpContext context = HttpContext.Current;
-            Func<NameValueCollection> formGetter;
-            Func<NameValueCollection> queryStringGetter;
-            ValidationUtility.GetUnvalidatedCollections(context, out formGetter, out queryStringGetter);
-
-            return new UnvalidatedRequestValues(new HttpRequestWrapper(context.Request), formGetter, queryStringGetter);
+#pragma warning disable 0618 // Obsolete System.Web.Helpers.UnvalidatedRequestValues
+            return new UnvalidatedRequestValues(new HttpRequestWrapper(context.Request));
+#pragma warning restore
         }
 
         public static string Unvalidated(this HttpRequestBase request, string key)

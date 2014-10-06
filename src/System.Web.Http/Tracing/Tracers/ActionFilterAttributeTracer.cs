@@ -3,9 +3,13 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Contracts;
 using System.Net.Http;
+using System.Runtime.CompilerServices;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Web.Http.Controllers;
 using System.Web.Http.Filters;
 using System.Web.Http.Properties;
+using System.Web.Http.Services;
 
 namespace System.Web.Http.Tracing.Tracers
 {
@@ -13,11 +17,8 @@ namespace System.Web.Http.Tracing.Tracers
     /// Tracer for <see cref="ActionFilterAttribute"/>.
     /// </summary>
     [SuppressMessage("Microsoft.Performance", "CA1813:AvoidUnsealedAttributes", Justification = "internal type needs to override, tracer are not sealed")]
-    internal class ActionFilterAttributeTracer : ActionFilterAttribute
+    internal class ActionFilterAttributeTracer : ActionFilterAttribute, IDecorator<ActionFilterAttribute>
     {
-        private const string ActionExecutedMethodName = "ActionExecuted";
-        private const string ActionExecutingMethodName = "ActionExecuting";
-
         private readonly ActionFilterAttribute _innerFilter;
         private readonly ITraceWriter _traceWriter;
 
@@ -28,6 +29,11 @@ namespace System.Web.Http.Tracing.Tracers
 
             _innerFilter = innerFilter;
             _traceWriter = traceWriter;
+        }
+
+        public ActionFilterAttribute Inner
+        {
+            get { return _innerFilter; }
         }
 
         public override bool AllowMultiple
@@ -68,12 +74,24 @@ namespace System.Web.Http.Tracing.Tracers
 
         public override void OnActionExecuted(HttpActionExecutedContext actionExecutedContext)
         {
-            _traceWriter.TraceBeginEnd(
+            // This will never get called, all the traces are going through OnActionExecutingAsync, which calls directly the inner method.
+        }
+
+        public override Task OnActionExecutedAsync(HttpActionExecutedContext actionExecutedContext, CancellationToken cancellationToken)
+        {
+            return OnActionExecutedAsyncCore(actionExecutedContext, cancellationToken);
+        }
+
+        private Task OnActionExecutedAsyncCore(HttpActionExecutedContext actionExecutedContext,
+                                               CancellationToken cancellationToken,
+                                               [CallerMemberName] string methodName = null)
+        {
+            return _traceWriter.TraceBeginEndAsync(
                 actionExecutedContext.Request,
                 TraceCategories.FiltersCategory,
                 TraceLevel.Info,
                 _innerFilter.GetType().Name,
-                ActionExecutedMethodName,
+                methodName,
                 beginTrace: (tr) =>
                 {
                     tr.Message = Error.Format(
@@ -87,9 +105,9 @@ namespace System.Web.Http.Tracing.Tracers
                         tr.Status = response.StatusCode;
                     }
                 },
-                execute: () =>
+                execute: async () =>
                 {
-                    _innerFilter.OnActionExecuted(actionExecutedContext);
+                    await _innerFilter.OnActionExecutedAsync(actionExecutedContext, cancellationToken);
                 },
                 endTrace: (tr) =>
                 {
@@ -112,12 +130,24 @@ namespace System.Web.Http.Tracing.Tracers
 
         public override void OnActionExecuting(HttpActionContext actionContext)
         {
-            _traceWriter.TraceBeginEnd(
+            // This will never get called, all the traces are going through OnActionExecutingAsync, which calls directly the inner method.
+        }
+
+        public override Task OnActionExecutingAsync(HttpActionContext actionContext, CancellationToken cancellationToken)
+        {
+            return OnActionExecutingAsyncCore(actionContext, cancellationToken);
+        }
+
+        private Task OnActionExecutingAsyncCore(HttpActionContext actionContext,
+                                                CancellationToken cancellationToken,
+                                                [CallerMemberName] string methodName = null)
+        {
+            return _traceWriter.TraceBeginEndAsync(
                 actionContext.Request,
                 TraceCategories.FiltersCategory,
                 TraceLevel.Info,
                 _innerFilter.GetType().Name,
-                ActionExecutingMethodName,
+                methodName,
                 beginTrace: (tr) =>
                 {
                     tr.Message = Error.Format(
@@ -131,9 +161,9 @@ namespace System.Web.Http.Tracing.Tracers
                         tr.Status = response.StatusCode;
                     }
                 },
-                execute: () =>
+                execute: async () =>
                 {
-                    _innerFilter.OnActionExecuting(actionContext);
+                    await _innerFilter.OnActionExecutingAsync(actionContext, cancellationToken);
                 },
                 endTrace: (tr) =>
                 {

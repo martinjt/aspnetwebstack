@@ -2,6 +2,7 @@
 
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Net.Http.Formatting;
@@ -9,10 +10,12 @@ using System.Net.Http.Headers;
 using System.Security.Cryptography.X509Certificates;
 using System.Threading;
 using System.Web.Http;
+using System.Web.Http.Controllers;
 using System.Web.Http.Dependencies;
 using System.Web.Http.Hosting;
 using System.Web.Http.ModelBinding;
 using System.Web.Http.Properties;
+using System.Web.Http.Results;
 using System.Web.Http.Routing;
 
 namespace System.Net.Http
@@ -35,7 +38,45 @@ namespace System.Net.Http
                 throw Error.ArgumentNull("request");
             }
 
+            HttpRequestContext requestContext = GetRequestContext(request);
+
+            if (requestContext != null)
+            {
+                return requestContext.Configuration;
+            }
+
+            return request.LegacyGetConfiguration();
+        }
+
+        internal static HttpConfiguration LegacyGetConfiguration(this HttpRequestMessage request)
+        {
             return request.GetProperty<HttpConfiguration>(HttpPropertyKeys.HttpConfigurationKey);
+        }
+
+        /// <summary>
+        /// Sets the <see cref="HttpConfiguration"/> for the given request.
+        /// </summary>
+        /// <param name="request">The HTTP request.</param>
+        /// <param name="configuration">The <see cref="HttpConfiguration"/> to set.</param>
+        public static void SetConfiguration(this HttpRequestMessage request, HttpConfiguration configuration)
+        {
+            if (request == null)
+            {
+                throw Error.ArgumentNull("request");
+            }
+            if (configuration == null)
+            {
+                throw Error.ArgumentNull("configuration");
+            }
+
+            HttpRequestContext requestContext = GetRequestContext(request);
+
+            if (requestContext != null)
+            {
+                requestContext.Configuration = configuration;
+            }
+
+            request.Properties[HttpPropertyKeys.HttpConfigurationKey] = configuration;
         }
 
         /// <summary>
@@ -68,6 +109,37 @@ namespace System.Net.Http
             return result;
         }
 
+        /// <summary>Gets the <see cref="HttpRequestContext"/> associated with this request.</summary>
+        /// <param name="request">The HTTP request.</param>
+        /// <returns>The <see cref="HttpRequestContext"/> associated with this request.</returns>
+        public static HttpRequestContext GetRequestContext(this HttpRequestMessage request)
+        {
+            if (request == null)
+            {
+                throw Error.ArgumentNull("request");
+            }
+
+            return request.GetProperty<HttpRequestContext>(HttpPropertyKeys.RequestContextKey);
+        }
+
+        /// <summary>Gets an <see cref="HttpRequestContext"/> associated with this request.</summary>
+        /// <param name="request">The HTTP request.</param>
+        /// <param name="context">The <see cref="HttpRequestContext"/> to associate with this request.</param>
+        public static void SetRequestContext(this HttpRequestMessage request, HttpRequestContext context)
+        {
+            if (request == null)
+            {
+                throw Error.ArgumentNull("request");
+            }
+
+            if (context == null)
+            {
+                throw Error.ArgumentNull("context");
+            }
+
+            request.Properties[HttpPropertyKeys.RequestContextKey] = context;
+        }
+
         /// <summary>
         /// Gets the <see cref="System.Threading.SynchronizationContext"/> for the given request or null if not available.
         /// </summary>
@@ -83,6 +155,16 @@ namespace System.Net.Http
             return request.GetProperty<SynchronizationContext>(HttpPropertyKeys.SynchronizationContextKey);
         }
 
+        internal static void SetSynchronizationContext(this HttpRequestMessage request, SynchronizationContext synchronizationContext)
+        {
+            if (request == null)
+            {
+                throw Error.ArgumentNull("request");
+            }
+
+            request.Properties[HttpPropertyKeys.SynchronizationContextKey] = synchronizationContext;
+        }
+
         /// <summary>
         /// Gets the current <see cref="T:System.Security.Cryptography.X509Certificates.X509Certificate2"/> or null if not available.
         /// </summary>
@@ -95,6 +177,18 @@ namespace System.Net.Http
                 throw Error.ArgumentNull("request");
             }
 
+            HttpRequestContext requestContext = GetRequestContext(request);
+
+            if (requestContext != null)
+            {
+                return requestContext.ClientCertificate;
+            }
+
+            return request.LegacyGetClientCertificate();
+        }
+
+        internal static X509Certificate2 LegacyGetClientCertificate(this HttpRequestMessage request)
+        {
             X509Certificate2 result = null;
 
             if (!request.Properties.TryGetValue(HttpPropertyKeys.ClientCertificateKey, out result))
@@ -128,7 +222,71 @@ namespace System.Net.Http
                 throw Error.ArgumentNull("request");
             }
 
+            HttpRequestContext requestContext = GetRequestContext(request);
+
+            if (requestContext != null)
+            {
+                return requestContext.RouteData;
+            }
+
+            return request.LegacyGetRouteData();
+        }
+
+        internal static IHttpRouteData LegacyGetRouteData(this HttpRequestMessage request)
+        {
             return request.GetProperty<IHttpRouteData>(HttpPropertyKeys.HttpRouteDataKey);
+        }
+
+        /// <summary>
+        /// Sets the <see cref="System.Web.Http.Routing.IHttpRouteData"/> for the given request.
+        /// </summary>
+        /// <param name="request">The HTTP request.</param>
+        /// <param name="routeData">The HTTP route data.</param>
+        public static void SetRouteData(this HttpRequestMessage request, IHttpRouteData routeData)
+        {
+            if (request == null)
+            {
+                throw Error.ArgumentNull("request");
+            }
+
+            if (routeData == null)
+            {
+                throw Error.ArgumentNull("routeData");
+            }
+
+            HttpRequestContext requestContext = GetRequestContext(request);
+
+            if (requestContext != null)
+            {
+                requestContext.RouteData = routeData;
+            }
+
+            request.Properties[HttpPropertyKeys.HttpRouteDataKey] = routeData;
+        }
+
+        /// <summary>
+        /// Gets the <see cref="System.Web.Http.Controllers.HttpActionDescriptor"/> selected for the given request or null if not available.
+        /// </summary>
+        /// <param name="request">The HTTP request.</param>
+        /// <returns>The <see cref="System.Web.Http.Controllers.HttpActionDescriptor"/> or null.</returns>
+        public static HttpActionDescriptor GetActionDescriptor(this HttpRequestMessage request)
+        {
+            if (request == null)
+            {
+                throw Error.ArgumentNull("request");
+            }
+
+            return request.GetProperty<HttpActionDescriptor>(HttpPropertyKeys.HttpActionDescriptorKey);
+        }
+
+        internal static void SetActionDescriptor(this HttpRequestMessage request, HttpActionDescriptor actionDescriptor)
+        {
+            if (request == null)
+            {
+                throw Error.ArgumentNull("request");
+            }
+
+            request.Properties[HttpPropertyKeys.HttpActionDescriptorKey] = actionDescriptor;
         }
 
         private static T GetProperty<T>(this HttpRequestMessage request, string key)
@@ -139,12 +297,35 @@ namespace System.Net.Http
         }
 
         /// <summary>
-        /// Helper method that performs content negotiation and creates a <see cref="HttpResponseMessage"/> representing an error 
+        /// Helper method for creating an <see cref="HttpResponseMessage"/> message with a "416 (Requested Range Not Satisfiable)" status code.
+        /// This response can be used in combination with the <see cref="ByteRangeStreamContent"/> to indicate that the requested range or
+        /// ranges do not overlap with the current resource. The response contains a "Content-Range" header indicating the valid upper and lower
+        /// bounds for requested ranges.
+        /// </summary>
+        /// <param name="request">The request.</param>
+        /// <param name="invalidByteRangeException">An <see cref="InvalidByteRangeException"/> instance, typically thrown by a
+        /// <see cref="ByteRangeStreamContent"/> instance.</param>
+        /// <returns>An 416 (Requested Range Not Satisfiable) error response with a Content-Range header indicating the valid range.</returns>
+        [SuppressMessage("Microsoft.Reliability", "CA2000:Dispose objects before losing scope", Justification = "Caller will dispose")]
+        public static HttpResponseMessage CreateErrorResponse(this HttpRequestMessage request, InvalidByteRangeException invalidByteRangeException)
+        {
+            if (invalidByteRangeException == null)
+            {
+                throw Error.ArgumentNull("invalidByteRangeException");
+            }
+
+            HttpResponseMessage rangeNotSatisfiableResponse = request.CreateErrorResponse(HttpStatusCode.RequestedRangeNotSatisfiable, invalidByteRangeException);
+            rangeNotSatisfiableResponse.Content.Headers.ContentRange = invalidByteRangeException.ContentRange;
+            return rangeNotSatisfiableResponse;
+        }
+
+        /// <summary>
+        /// Helper method that performs content negotiation and creates a <see cref="HttpResponseMessage"/> representing an error
         /// with an instance of <see cref="ObjectContent{T}"/> wrapping an <see cref="HttpError"/> with message <paramref name="message"/>.
         /// If no formatter is found, this method returns a response with status 406 NotAcceptable.
         /// </summary>
         /// <remarks>
-        /// This method requires that <paramref name="request"/> has been associated with an instance of 
+        /// This method requires that <paramref name="request"/> has been associated with an instance of
         /// <see cref="HttpConfiguration"/>.
         /// </remarks>
         /// <param name="request">The request.</param>
@@ -157,13 +338,13 @@ namespace System.Net.Http
         }
 
         /// <summary>
-        /// Helper method that performs content negotiation and creates a <see cref="HttpResponseMessage"/> representing an error 
+        /// Helper method that performs content negotiation and creates a <see cref="HttpResponseMessage"/> representing an error
         /// with an instance of <see cref="ObjectContent{T}"/> wrapping an <see cref="HttpError"/> with message <paramref name="message"/>
-        /// and message detail <paramref name="messageDetail"/>.If no formatter is found, this method returns a response with 
+        /// and message detail <paramref name="messageDetail"/>.If no formatter is found, this method returns a response with
         /// status 406 NotAcceptable.
         /// </summary>
         /// <remarks>
-        /// This method requires that <paramref name="request"/> has been associated with an instance of 
+        /// This method requires that <paramref name="request"/> has been associated with an instance of
         /// <see cref="HttpConfiguration"/>.
         /// </remarks>
         /// <param name="request">The request.</param>
@@ -178,7 +359,7 @@ namespace System.Net.Http
         }
 
         /// <summary>
-        /// Helper method that performs content negotiation and creates a <see cref="HttpResponseMessage"/> representing an error 
+        /// Helper method that performs content negotiation and creates a <see cref="HttpResponseMessage"/> representing an error
         /// with an instance of <see cref="ObjectContent{T}"/> wrapping an <see cref="HttpError"/> with error message <paramref name="message"/>
         /// for exception <paramref name="exception"/>. If no formatter is found, this method returns a response with status 406 NotAcceptable.
         /// </summary>
@@ -203,7 +384,7 @@ namespace System.Net.Http
         }
 
         /// <summary>
-        /// Helper method that performs content negotiation and creates a <see cref="HttpResponseMessage"/> representing an error 
+        /// Helper method that performs content negotiation and creates a <see cref="HttpResponseMessage"/> representing an error
         /// with an instance of <see cref="ObjectContent{T}"/> wrapping an <see cref="HttpError"/> for exception <paramref name="exception"/>.
         /// If no formatter is found, this method returns a response with status 406 NotAcceptable.
         /// </summary>
@@ -226,7 +407,7 @@ namespace System.Net.Http
         }
 
         /// <summary>
-        /// Helper method that performs content negotiation and creates a <see cref="HttpResponseMessage"/> representing an error 
+        /// Helper method that performs content negotiation and creates a <see cref="HttpResponseMessage"/> representing an error
         /// with an instance of <see cref="ObjectContent{T}"/> wrapping an <see cref="HttpError"/> for model state <paramref name="modelState"/>.
         /// If no formatter is found, this method returns a response with status 406 NotAcceptable.
         /// </summary>
@@ -249,8 +430,8 @@ namespace System.Net.Http
         }
 
         /// <summary>
-        /// Helper method that performs content negotiation and creates a <see cref="HttpResponseMessage"/> representing an error 
-        /// with an instance of <see cref="ObjectContent{T}"/> wrapping <paramref name="error"/> as the content. If no formatter 
+        /// Helper method that performs content negotiation and creates a <see cref="HttpResponseMessage"/> representing an error
+        /// with an instance of <see cref="ObjectContent{T}"/> wrapping <paramref name="error"/> as the content. If no formatter
         /// is found, this method returns a response with status 406 NotAcceptable.
         /// </summary>
         /// <remarks>
@@ -275,21 +456,41 @@ namespace System.Net.Http
         {
             HttpConfiguration configuration = request.GetConfiguration();
 
+            HttpError error = errorCreator(request.ShouldIncludeErrorDetail());
+
             // CreateErrorResponse should never fail, even if there is no configuration associated with the request
             // In that case, use the default HttpConfiguration to con-neg the response media type
             if (configuration == null)
             {
                 using (HttpConfiguration defaultConfig = new HttpConfiguration())
                 {
-                    HttpError error = errorCreator(defaultConfig.ShouldIncludeErrorDetail(request));
                     return request.CreateResponse<HttpError>(statusCode, error, defaultConfig);
                 }
             }
             else
             {
-                HttpError error = errorCreator(configuration.ShouldIncludeErrorDetail(request));
                 return request.CreateResponse<HttpError>(statusCode, error, configuration);
             }
+        }
+
+        /// <summary>
+        /// Helper method that performs content negotiation and creates a <see cref="HttpResponseMessage"/> with an instance
+        /// of <see cref="ObjectContent{T}"/> as the content and <see cref="System.Net.HttpStatusCode.OK"/> as the status code
+        /// if a formatter can be found. If no formatter is found, this method returns a response with status 406 NotAcceptable.
+        /// This forwards the call to <see cref="CreateResponse{T}(HttpRequestMessage, HttpStatusCode, T, HttpConfiguration)"/> with
+        /// <see cref="System.Net.HttpStatusCode.OK"/> status code and a <c>null</c> configuration.
+        /// </summary>
+        /// <remarks>
+        /// This method requires that <paramref name="request"/> has been associated with an instance of
+        /// <see cref="HttpConfiguration"/>.
+        /// </remarks>
+        /// <typeparam name="T">The type of the value.</typeparam>
+        /// <param name="request">The request.</param>
+        /// <param name="value">The value to wrap. Can be <c>null</c>.</param>
+        /// <returns>A response wrapping <paramref name="value"/> with <see cref="System.Net.HttpStatusCode.OK"/> status code.</returns>
+        public static HttpResponseMessage CreateResponse<T>(this HttpRequestMessage request, T value)
+        {
+            return request.CreateResponse<T>(HttpStatusCode.OK, value, configuration: null);
         }
 
         /// <summary>
@@ -319,7 +520,7 @@ namespace System.Net.Http
         /// method returns a response with status 406 NotAcceptable.
         /// </summary>
         /// <remarks>
-        /// This method will use the provided <paramref name="configuration"/> or it will get the 
+        /// This method will use the provided <paramref name="configuration"/> or it will get the
         /// <see cref="HttpConfiguration"/> instance associated with <paramref name="request"/>.
         /// </remarks>
         /// <typeparam name="T">The type of the value.</typeparam>
@@ -327,8 +528,7 @@ namespace System.Net.Http
         /// <param name="statusCode">The status code of the created response.</param>
         /// <param name="value">The value to wrap. Can be <c>null</c>.</param>
         /// <param name="configuration">The configuration to use. Can be <c>null</c>.</param>
-        /// <returns>A response wrapping <paramref name="value"/> with <paramref name="statusCode"/>.</returns>   
-        [SuppressMessage("Microsoft.Reliability", "CA2000:Dispose objects before losing scope", Justification = "Caller will dispose")]
+        /// <returns>A response wrapping <paramref name="value"/> with <paramref name="statusCode"/>.</returns>
         public static HttpResponseMessage CreateResponse<T>(this HttpRequestMessage request, HttpStatusCode statusCode, T value, HttpConfiguration configuration)
         {
             if (request == null)
@@ -350,29 +550,7 @@ namespace System.Net.Http
 
             IEnumerable<MediaTypeFormatter> formatters = configuration.Formatters;
 
-            // Run content negotiation
-            ContentNegotiationResult result = contentNegotiator.Negotiate(typeof(T), request, formatters);
-
-            if (result == null)
-            {
-                // no result from content negotiation indicates that 406 should be sent.
-                return new HttpResponseMessage
-                {
-                    StatusCode = HttpStatusCode.NotAcceptable,
-                    RequestMessage = request,
-                };
-            }
-            else
-            {
-                MediaTypeHeaderValue mediaType = result.MediaType;
-                return new HttpResponseMessage
-                {
-                    // At this point mediaType should be a cloned value (the content negotiator is responsible for returning a new copy)
-                    Content = new ObjectContent<T>(value, result.Formatter, mediaType),
-                    StatusCode = statusCode,
-                    RequestMessage = request
-                };
-            }
+            return NegotiatedContentResult<T>.Execute(statusCode, value, contentNegotiator, request, formatters);
         }
 
         /// <summary>
@@ -473,7 +651,6 @@ namespace System.Net.Http
         /// <param name="formatter">The formatter to use.</param>
         /// <param name="mediaType">The media type override to set on the response's content. Can be <c>null</c>.</param>
         /// <returns>A response wrapping <paramref name="value"/> with <paramref name="statusCode"/>.</returns>
-        [SuppressMessage("Microsoft.Reliability", "CA2000:Dispose objects before losing scope", Justification = "Caller will dispose")]
         public static HttpResponseMessage CreateResponse<T>(this HttpRequestMessage request, HttpStatusCode statusCode, T value, MediaTypeFormatter formatter, MediaTypeHeaderValue mediaType)
         {
             if (request == null)
@@ -485,9 +662,7 @@ namespace System.Net.Http
                 throw Error.ArgumentNull("formatter");
             }
 
-            HttpResponseMessage response = request.CreateResponse(statusCode);
-            response.Content = new ObjectContent<T>(value, formatter, mediaType);
-            return response;
+            return FormattedContentResult<T>.Execute(statusCode, value, formatter, mediaType, request);
         }
 
         /// <summary>
@@ -508,14 +683,38 @@ namespace System.Net.Http
                 return;
             }
 
-            List<IDisposable> trackedResources;
-            if (!request.Properties.TryGetValue(HttpPropertyKeys.DisposableRequestResourcesKey, out trackedResources))
-            {
-                trackedResources = new List<IDisposable>();
-                request.Properties[HttpPropertyKeys.DisposableRequestResourcesKey] = trackedResources;
-            }
+            List<IDisposable> trackedResources = GetRegisteredResourcesForDispose(request);
 
             trackedResources.Add(resource);
+        }
+
+        /// <summary>
+        /// Adds the given <paramref name="resources"/> to a list of resources that will be disposed by a host once
+        /// the <paramref name="request"/> is disposed.
+        /// </summary>
+        /// <param name="request">The request controlling the lifecycle of <paramref name="resources"/>.</param>
+        /// <param name="resources">The resources to dispose when <paramref name="request"/> is being disposed. Can be <c>null</c>.</param>
+        public static void RegisterForDispose(this HttpRequestMessage request, IEnumerable<IDisposable> resources)
+        {
+            if (request == null)
+            {
+                throw Error.ArgumentNull("request");
+            }
+
+            if (resources == null)
+            {
+                throw Error.ArgumentNull("resources");
+            }
+
+            List<IDisposable> trackedResources = GetRegisteredResourcesForDispose(request);
+
+            foreach (IDisposable resource in resources)
+            {
+                if (resource != null)
+                {
+                    trackedResources.Add(resource);
+                }
+            }
         }
 
         /// <summary>
@@ -566,7 +765,13 @@ namespace System.Net.Http
             Guid correlationId;
             if (!request.Properties.TryGetValue<Guid>(HttpPropertyKeys.RequestCorrelationKey, out correlationId))
             {
-                correlationId = Guid.NewGuid();
+                // Check if the Correlation Manager ID is set; otherwise fallback to creating a new GUID
+                correlationId = Trace.CorrelationManager.ActivityId;
+                if (correlationId == Guid.Empty)
+                {
+                    correlationId = Guid.NewGuid();
+                }
+
                 request.Properties.Add(HttpPropertyKeys.RequestCorrelationKey, correlationId);
             }
 
@@ -599,13 +804,21 @@ namespace System.Net.Http
             {
                 // Uri --> FormData --> NVC
                 FormDataCollection formData = new FormDataCollection(uri);
-                queryString = formData.GetJQueryNameValuePairs();
+
+                // The ToArray call here avoids reparsing the query string, and avoids storing an Enumerator state
+                // machine in the request state.
+                queryString = formData.GetJQueryNameValuePairs().ToArray();
                 request.Properties.Add(HttpPropertyKeys.RequestQueryNameValuePairsKey, queryString);
             }
 
             return queryString;
         }
 
+        /// <summary>
+        /// Retrieves the <see cref="UrlHelper"/> instance associated with this request.
+        /// </summary>
+        /// <param name="request">The <see cref="HttpRequestMessage"/>.</param>
+        /// <returns>The <see cref="UrlHelper"/> instance associated with this request.</returns>
         public static UrlHelper GetUrlHelper(this HttpRequestMessage request)
         {
             if (request == null)
@@ -613,7 +826,139 @@ namespace System.Net.Http
                 throw Error.ArgumentNull("request");
             }
 
+            HttpRequestContext requestContext = GetRequestContext(request);
+
+            if (requestContext != null)
+            {
+                return requestContext.Url;
+            }
+
             return new UrlHelper(request);
+        }
+
+        /// <summary>
+        /// Gets a value indicating whether the request originates from a local address or not.
+        /// </summary>
+        /// <param name="request">The HTTP request.</param>
+        /// <returns><see langword="true"/> if the request originates from a local address; otherwise, <see langword="false"/>.</returns>
+        public static bool IsLocal(this HttpRequestMessage request)
+        {
+            if (request == null)
+            {
+                throw Error.ArgumentNull("request");
+            }
+
+            HttpRequestContext requestContext = GetRequestContext(request);
+
+            if (requestContext != null)
+            {
+                return requestContext.IsLocal;
+            }
+
+            return request.LegacyIsLocal();
+        }
+
+        internal static bool LegacyIsLocal(this HttpRequestMessage request)
+        {
+            Lazy<bool> isLocal = request.GetProperty<Lazy<bool>>(HttpPropertyKeys.IsLocalKey);
+
+            return isLocal == null ? false : isLocal.Value;
+        }
+
+        /// <summary>
+        /// Gets a value indicating whether the request originates from a batch.
+        /// </summary>
+        /// <param name="request">The HTTP request.</param>
+        /// <returns><see langword="true"/> if the request originates from a batch; otherwise, <see langword="false"/>.</returns>
+        public static bool IsBatchRequest(this HttpRequestMessage request)
+        {
+            if (request == null)
+            {
+                throw Error.ArgumentNull("request");
+            }
+
+            return request.GetProperty<bool>(HttpPropertyKeys.IsBatchRequest);
+        }
+
+        /// <summary>
+        /// Gets a value indicating whether error details, such as exception messages and stack traces, should be included for this HTTP request.
+        /// </summary>
+        /// <param name="request">The HTTP request.</param>
+        /// <returns><see langword="true"/> if the error details are to be included; otherwise, <see langword="false"/>.</returns>
+        public static bool ShouldIncludeErrorDetail(this HttpRequestMessage request)
+        {
+            if (request == null)
+            {
+                throw Error.ArgumentNull("request");
+            }
+
+            HttpRequestContext requestContext = GetRequestContext(request);
+
+            if (requestContext != null)
+            {
+                return requestContext.IncludeErrorDetail;
+            }
+
+            return request.LegacyShouldIncludeErrorDetail();
+        }
+
+        internal static bool LegacyShouldIncludeErrorDetail(this HttpRequestMessage request)
+        {
+            HttpConfiguration configuration = request.GetConfiguration();
+            IncludeErrorDetailPolicy includeErrorDetailPolicy = IncludeErrorDetailPolicy.Default;
+            if (configuration != null)
+            {
+                includeErrorDetailPolicy = configuration.IncludeErrorDetailPolicy;
+            }
+            switch (includeErrorDetailPolicy)
+            {
+                case IncludeErrorDetailPolicy.Default:
+                    Lazy<bool> includeErrorDetail = request.GetProperty<Lazy<bool>>(HttpPropertyKeys.IncludeErrorDetailKey);
+                    if (includeErrorDetail != null)
+                    {
+                        // If we are on webhost and the user hasn't changed the IncludeErrorDetailPolicy
+                        // look up into the Request's property bag else default to LocalOnly.
+                        return includeErrorDetail.Value;
+                    }
+
+                    goto case IncludeErrorDetailPolicy.LocalOnly;
+
+                case IncludeErrorDetailPolicy.LocalOnly:
+                    return request.IsLocal();
+
+                case IncludeErrorDetailPolicy.Always:
+                    return true;
+
+                case IncludeErrorDetailPolicy.Never:
+                default:
+                    return false;
+            }
+        }
+
+        /// <summary>
+        /// Gets the collection of resources registered for dispose once the <paramref name="request"/> is disposed.
+        /// </summary>
+        /// <param name="request">The request.</param>
+        /// <returns>A collection of resources registered for dispose.</returns>
+        public static IEnumerable<IDisposable> GetResourcesForDisposal(this HttpRequestMessage request)
+        {
+            if (request == null)
+            {
+                throw Error.ArgumentNull("request");
+            }
+
+            return GetRegisteredResourcesForDispose(request);
+        }
+
+        private static List<IDisposable> GetRegisteredResourcesForDispose(HttpRequestMessage request)
+        {
+            List<IDisposable> registeredResourcesForDispose;
+            if (!request.Properties.TryGetValue(HttpPropertyKeys.DisposableRequestResourcesKey, out registeredResourcesForDispose))
+            {
+                registeredResourcesForDispose = new List<IDisposable>();
+                request.Properties[HttpPropertyKeys.DisposableRequestResourcesKey] = registeredResourcesForDispose;
+            }
+            return registeredResourcesForDispose;
         }
     }
 }

@@ -1,5 +1,6 @@
 ﻿// Copyright (c) Microsoft Open Technologies, Inc. All rights reserved. See License.txt in the project root for license information.
 
+using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Reflection;
@@ -76,34 +77,39 @@ namespace System.Web.Mvc
             if (asyncController != null)
             {
                 // asynchronous controller
-                BeginInvokeDelegate beginDelegate = delegate(AsyncCallback asyncCallback, object asyncState)
+
+                // Ensure delegates continue to use the C# Compiler static delegate caching optimization.
+                BeginInvokeDelegate<ProcessRequestState> beginDelegate = delegate(AsyncCallback asyncCallback, object asyncState, ProcessRequestState innerState)
                 {
                     try
                     {
-                        return asyncController.BeginExecute(RequestContext, asyncCallback, asyncState);
+                        return innerState.AsyncController.BeginExecute(innerState.RequestContext, asyncCallback, asyncState);
                     }
                     catch
                     {
-                        factory.ReleaseController(asyncController);
+                        innerState.ReleaseController();
                         throw;
                     }
                 };
 
-                EndInvokeDelegate endDelegate = delegate(IAsyncResult asyncResult)
+                EndInvokeVoidDelegate<ProcessRequestState> endDelegate = delegate(IAsyncResult asyncResult, ProcessRequestState innerState)
                 {
                     try
                     {
-                        asyncController.EndExecute(asyncResult);
+                        innerState.AsyncController.EndExecute(asyncResult);
                     }
                     finally
                     {
-                        factory.ReleaseController(asyncController);
+                        innerState.ReleaseController();
                     }
                 };
-
-                SynchronizationContext syncContext = SynchronizationContextUtil.GetSynchronizationContext();
-                AsyncCallback newCallback = AsyncUtil.WrapCallbackForSynchronizedExecution(callback, syncContext);
-                return AsyncResultWrapper.Begin(newCallback, state, beginDelegate, endDelegate, _processRequestTag);
+                ProcessRequestState outerState = new ProcessRequestState() 
+                {
+                    AsyncController = asyncController, Factory = factory, RequestContext = RequestContext
+                };
+                
+                SynchronizationContext callbackSyncContext = SynchronizationContextUtil.GetSynchronizationContext();
+                return AsyncResultWrapper.Begin(callback, state, beginDelegate, endDelegate, outerState, _processRequestTag, callbackSyncContext: callbackSyncContext);
             }
             else
             {
@@ -198,16 +204,8 @@ namespace System.Web.Mvc
         {
             RouteValueDictionary rvd = RequestContext.RouteData.Values;
 
-            // Get all keys for which the corresponding value is 'Optional'.
-            // ToArray() necessary so that we don't manipulate the dictionary while enumerating.
-            string[] matchingKeys = (from entry in rvd
-                                     where entry.Value == UrlParameter.Optional
-                                     select entry.Key).ToArray();
-
-            foreach (string key in matchingKeys)
-            {
-                rvd.Remove(key);
-            }
+            // Ensure delegate is stateless
+            rvd.RemoveFromDictionary((entry) => entry.Value == UrlParameter.Optional);
         }
 
         #region IHttpHandler Members
@@ -237,5 +235,18 @@ namespace System.Web.Mvc
         }
 
         #endregion
+
+        // Keep as value type to avoid allocating
+        private struct ProcessRequestState
+        {
+            internal IAsyncController AsyncController;
+            internal IControllerFactory Factory;
+            internal RequestContext RequestContext;
+
+            internal void ReleaseController()
+            {
+                Factory.ReleaseController(AsyncController);
+            }
+        }
     }
 }

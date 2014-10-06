@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Web.Http.Controllers;
 using System.Web.Http.Filters;
+using System.Web.Http.Services;
 using Microsoft.TestCommon;
 using Moq;
 
@@ -127,8 +128,8 @@ namespace System.Web.Http.Tracing.Tracers
             ExceptionFilterAttributeTracer tracer = new ExceptionFilterAttributeTracer(mockAttr.Object, traceWriter);
             TraceRecord[] expectedTraces = new TraceRecord[]
             {
-                new TraceRecord(request, TraceCategories.FiltersCategory, TraceLevel.Info) { Kind = TraceKind.Begin, Operation = "OnException" },
-                new TraceRecord(request, TraceCategories.FiltersCategory, TraceLevel.Info) { Kind = TraceKind.End,  Operation = "OnException" },
+                new TraceRecord(request, TraceCategories.FiltersCategory, TraceLevel.Info) { Kind = TraceKind.Begin, Operation = "OnExceptionAsync" },
+                new TraceRecord(request, TraceCategories.FiltersCategory, TraceLevel.Info) { Kind = TraceKind.End,  Operation = "OnExceptionAsync" },
             };
 
             // Act
@@ -147,28 +148,69 @@ namespace System.Web.Http.Tracing.Tracers
             HttpResponseMessage response = new HttpResponseMessage();
             Mock<ExceptionFilterAttribute> mockAttr = new Mock<ExceptionFilterAttribute>() { CallBase = true };
             InvalidOperationException exception = new InvalidOperationException("test");
-            mockAttr.Setup(a => a.OnException(It.IsAny<HttpActionExecutedContext>())).Throws(exception);
+            mockAttr.Setup(a => a.OnException(It.IsAny<HttpActionExecutedContext>())).Callback(() => { throw exception; });
             Mock<HttpActionDescriptor> mockActionDescriptor = new Mock<HttpActionDescriptor>() { CallBase = true };
             mockActionDescriptor.Setup(a => a.ActionName).Returns("test");
             mockActionDescriptor.Setup(a => a.GetParameters()).Returns(new Collection<HttpParameterDescriptor>(new HttpParameterDescriptor[0]));
             HttpActionExecutedContext actionExecutedContext = ContextUtil.GetActionExecutedContext(request, response);
             TestTraceWriter traceWriter = new TestTraceWriter();
-            ExceptionFilterAttributeTracer tracer = new ExceptionFilterAttributeTracer(mockAttr.Object, traceWriter);
+            IExceptionFilter tracer = new ExceptionFilterAttributeTracer(mockAttr.Object, traceWriter) as IExceptionFilter;
             TraceRecord[] expectedTraces = new TraceRecord[]
             {
-                new TraceRecord(request, TraceCategories.FiltersCategory, TraceLevel.Info) { Kind = TraceKind.Begin, Operation = "OnException" },
-                new TraceRecord(request, TraceCategories.FiltersCategory, TraceLevel.Error) { Kind = TraceKind.End,  Operation = "OnException" }
+                new TraceRecord(request, TraceCategories.FiltersCategory, TraceLevel.Info) { Kind = TraceKind.Begin, Operation = "OnExceptionAsync" },
+                new TraceRecord(request, TraceCategories.FiltersCategory, TraceLevel.Error) { Kind = TraceKind.End,  Operation = "OnExceptionAsync" }
             };
 
             // Act
-            Exception thrown =
-                Assert.Throws<InvalidOperationException>(
-                    () => ((IExceptionFilter) tracer).ExecuteExceptionFilterAsync(actionExecutedContext, CancellationToken.None));
+            Exception thrown = null;
+
+            // We separate the task creation and the wait, to verify we don't throw at task creation
+            // and that the exception flows inside the task (even if an Aggregate Exception was thrown).
+            var task = tracer.ExecuteExceptionFilterAsync(actionExecutedContext, CancellationToken.None);
+
+            try
+            {
+                task.Wait();
+            }
+            catch (AggregateException ex)
+            {
+                Assert.Equal(1, ex.InnerExceptions.Count);
+
+                thrown = ex.InnerException;
+            }
 
             // Assert
             Assert.Same(exception, thrown);
             Assert.Same(exception, traceWriter.Traces[1].Exception);
             Assert.Equal<TraceRecord>(expectedTraces, traceWriter.Traces, new TraceRecordComparer());
+        }
+
+        [Fact]
+        public void Inner_Property_On_ExceptionFilterAttributeTracer_Returns_ExceptionFilterAttribute()
+        {
+            // Arrange
+            ExceptionFilterAttribute expectedInner = new Mock<ExceptionFilterAttribute>().Object;
+            ExceptionFilterAttributeTracer productUnderTest = new ExceptionFilterAttributeTracer(expectedInner, new TestTraceWriter());
+
+            // Act
+            ExceptionFilterAttribute actualInner = productUnderTest.Inner;
+
+            // Assert
+            Assert.Same(expectedInner, actualInner);
+        }
+
+        [Fact]
+        public void Decorator_GetInner_On_ExceptionFilterAttributeTracer_Returns_ExceptionFilterAttribute()
+        {
+            // Arrange
+            ExceptionFilterAttribute expectedInner = new Mock<ExceptionFilterAttribute>().Object;
+            ExceptionFilterAttributeTracer productUnderTest = new ExceptionFilterAttributeTracer(expectedInner, new TestTraceWriter());
+
+            // Act
+            ExceptionFilterAttribute actualInner = Decorator.GetInner(productUnderTest as ExceptionFilterAttribute);
+
+            // Assert
+            Assert.Same(expectedInner, actualInner);
         }
     }
 }

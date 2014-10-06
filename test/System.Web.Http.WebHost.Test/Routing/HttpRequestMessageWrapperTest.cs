@@ -2,6 +2,7 @@
 
 using System.Collections.Specialized;
 using System.Net.Http;
+using System.Web.Http.Hosting;
 using Microsoft.TestCommon;
 
 namespace System.Web.Http.WebHost.Routing
@@ -42,6 +43,11 @@ namespace System.Web.Http.WebHost.Routing
                     { "/path1", "http://localhost/PATH1/path2/path3/", "~/path2/path3" },
                     { "/path1", "http://localhost/PATH1/PATH2/path3.ext/", "~/PATH2/path3.ext" },
                     { "/path1", "http://localhost/PATH1/PATH2/PATH3.ext/?query=value", "~/PATH2/PATH3.ext" },
+
+                    // urls should be unencoded - /path1/path2 /path3.ext instead of /path1/path2%20/path3.ext
+                    { "/path1", "http://localhost/PATH1/path2 /path3/", "~/path2 /path3" },
+                    { "/path1", "http://localhost/PATH1/PATH2 /path3.ext/", "~/PATH2 /path3.ext" },
+                    { "/path1", "http://localhost/PATH1/PATH2 /PATH3.ext/?query=value", "~/PATH2 /PATH3.ext" },
                 };
             }
         }
@@ -76,6 +82,11 @@ namespace System.Web.Http.WebHost.Routing
                     { "/path1", "http://localhost/path1/path2/path3/", "/path1/path2/path3" },
                     { "/path1", "http://localhost/path1/path2/path3.ext/", "/path1/path2/path3.ext" },
                     { "/path1", "http://localhost/path1/path2/path3.ext/?query=value", "/path1/path2/path3.ext" },
+
+                    // urls should be unescaped - /path1/path2 /path3.ext instead of /path1/path2%20/path3.ext
+                    { "/path1", "http://localhost/path1/path2 /path3/", "/path1/path2 /path3" },
+                    { "/path1", "http://localhost/path1/path2 /path3.ext/", "/path1/path2 /path3.ext" },
+                    { "/path1", "http://localhost/path1/path2 /path3.ext/?query=value", "/path1/path2 /path3.ext" },
                 };
             }
         }
@@ -209,7 +220,25 @@ namespace System.Web.Http.WebHost.Routing
             string actualPath = wrapper.Path;
 
             // Assert
-            Assert.Equal(requestUri.AbsolutePath, actualPath);
+            Assert.Equal("/some/path", actualPath);
+        }
+
+        [Fact]
+        public void Path_DelegatesToHttpRequestMessage_DoesNotEncode()
+        {
+            // Arrange
+            Uri requestUri = new Uri("http://localhost/some /path?query=value");
+            HttpRequestMessage request = new HttpRequestMessage
+            {
+                RequestUri = requestUri
+            };
+            HttpRequestMessageWrapper wrapper = new HttpRequestMessageWrapper("/", request);
+
+            // Act
+            string actualPath = wrapper.Path;
+
+            // Assert
+            Assert.Equal("/some /path", actualPath);
         }
 
         [Theory]
@@ -249,7 +278,40 @@ namespace System.Web.Http.WebHost.Routing
             string actualRawUrl = wrapper.RawUrl;
 
             // Assert
-            Assert.Equal(requestUri.PathAndQuery, actualRawUrl);
+            Assert.Equal("/some/path?query=value", actualRawUrl);
+        }
+
+        [Fact]
+        public void RawUrl_DelegatesToHttpRequestMessage_DoesNotEncode()
+        {
+            // Arrange
+            Uri requestUri = new Uri("http://localhost/some /path?query=value");
+            HttpRequestMessage request = new HttpRequestMessage
+            {
+                RequestUri = requestUri
+            };
+            HttpRequestMessageWrapper wrapper = new HttpRequestMessageWrapper("/", request);
+
+            // Act
+            string actualRawUrl = wrapper.RawUrl;
+
+            // Assert
+            Assert.Equal("/some /path?query=value", actualRawUrl);
+        }
+
+        [Fact]
+        public void IsLocal_Call_To_HttpRequestMessageExtension_Method()
+        {
+            // Arrange
+            HttpRequestMessage request = new HttpRequestMessage();
+            request.SetIsLocal(new Lazy<bool>(() => true));
+            HttpRequestMessageWrapper wrapper = new HttpRequestMessageWrapper("/", request);
+
+            // Act
+            bool isLocal = wrapper.IsLocal;
+
+            // Assert
+            Assert.True(isLocal);
         }
     }
 }

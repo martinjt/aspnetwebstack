@@ -1,85 +1,46 @@
 ﻿// Copyright (c) Microsoft Open Technologies, Inc. All rights reserved. See License.txt in the project root for license information.
 
 using System.Collections.Generic;
-using System.Globalization;
 using System.Linq;
 using System.Reflection;
-using System.Text;
 using System.Threading.Tasks;
-using System.Web.Mvc.Properties;
 
 namespace System.Web.Mvc.Async
 {
-    internal sealed class AsyncActionMethodSelector
+    internal sealed class AsyncActionMethodSelector : ActionMethodSelectorBase
     {
         // This flag controls async action binding for backwards compat since Controller now supports async. 
         // Set to true for classes that derive from AsyncController. In this case, FooAsync/FooCompleted is 
         // bound as a single async action pair "Foo". If false, they're bound as 2 separate sync actions. 
         // Practically, if this is false, then IsAsyncSuffixedMethod and IsCompeltedSuffixedMethod return false.
-        private bool _allowLegacyAsyncActions;
+        private readonly bool _allowLegacyAsyncActions;
 
         public AsyncActionMethodSelector(Type controllerType, bool allowLegacyAsyncActions = true)
         {
             _allowLegacyAsyncActions = allowLegacyAsyncActions;
-            ControllerType = controllerType;
-            PopulateLookupTables();
+            Initialize(controllerType);
         }
-
-        public Type ControllerType { get; private set; }
-
-        public MethodInfo[] AliasedMethods { get; private set; }
-
-        public ILookup<string, MethodInfo> NonAliasedMethods { get; private set; }
-
-        private AmbiguousMatchException CreateAmbiguousActionMatchException(IEnumerable<MethodInfo> ambiguousMethods, string actionName)
-        {
-            string ambiguityList = CreateAmbiguousMatchList(ambiguousMethods);
-            string message = String.Format(CultureInfo.CurrentCulture, MvcResources.ActionMethodSelector_AmbiguousMatch,
-                                           actionName, ControllerType.Name, ambiguityList);
-            return new AmbiguousMatchException(message);
-        }
-
-        private AmbiguousMatchException CreateAmbiguousMethodMatchException(IEnumerable<MethodInfo> ambiguousMethods, string methodName)
-        {
-            string ambiguityList = CreateAmbiguousMatchList(ambiguousMethods);
-            string message = String.Format(CultureInfo.CurrentCulture, MvcResources.AsyncActionMethodSelector_AmbiguousMethodMatch,
-                                           methodName, ControllerType.Name, ambiguityList);
-            return new AmbiguousMatchException(message);
-        }
-
-        private static string CreateAmbiguousMatchList(IEnumerable<MethodInfo> ambiguousMethods)
-        {
-            StringBuilder exceptionMessageBuilder = new StringBuilder();
-            foreach (MethodInfo methodInfo in ambiguousMethods)
-            {
-                exceptionMessageBuilder.AppendLine();
-                exceptionMessageBuilder.AppendFormat(CultureInfo.CurrentCulture, MvcResources.ActionMethodSelector_AmbiguousMatchType, methodInfo, methodInfo.DeclaringType.FullName);
-            }
-
-            return exceptionMessageBuilder.ToString();
-        }
-
+        
         public ActionDescriptorCreator FindAction(ControllerContext controllerContext, string actionName)
         {
-            List<MethodInfo> methodsMatchingName = GetMatchingAliasedMethods(controllerContext, actionName);
-            methodsMatchingName.AddRange(NonAliasedMethods[actionName]);
-            List<MethodInfo> finalMethods = RunSelectionFilters(controllerContext, methodsMatchingName);
+            MethodInfo method = FindActionMethod(controllerContext, actionName);
 
-            switch (finalMethods.Count)
+            if (method == null)
             {
-                case 0:
-                    return null;
-
-                case 1:
-                    MethodInfo entryMethod = finalMethods[0];
-                    return GetActionDescriptorDelegate(entryMethod);
-
-                default:
-                    throw CreateAmbiguousActionMatchException(finalMethods, actionName);
+                return null;
             }
+
+            return GetActionDescriptorDelegate(method);
         }
 
-        private ActionDescriptorCreator GetActionDescriptorDelegate(MethodInfo entryMethod)
+        internal bool AllowLegacyAsyncActions
+        {
+            get { return _allowLegacyAsyncActions; }
+        }
+
+        // This method and GetMethodInfo need to stay in sync, we need to be able to
+        // get a method info from each type of action descriptor we create.
+        internal ActionDescriptorCreator GetActionDescriptorDelegate(MethodInfo entryMethod)
         {
             // Does the action return a Task?
             if (entryMethod.ReturnType != null && typeof(Task).IsAssignableFrom(entryMethod.ReturnType))
@@ -106,61 +67,7 @@ namespace System.Web.Mvc.Async
             return (actionName, controllerDescriptor) => new ReflectedActionDescriptor(entryMethod, actionName, controllerDescriptor);
         }
 
-        private string GetCanonicalMethodName(MethodInfo methodInfo)
-        {
-            string methodName = methodInfo.Name;
-            return (IsAsyncSuffixedMethod(methodInfo))
-                       ? methodName.Substring(0, methodName.Length - "Async".Length)
-                       : methodName;
-        }
-
-        internal List<MethodInfo> GetMatchingAliasedMethods(ControllerContext controllerContext, string actionName)
-        {
-            // find all aliased methods which are opting in to this request
-            // to opt in, all attributes defined on the method must return true
-
-            var methods = from methodInfo in AliasedMethods
-                          let attrs = ReflectedAttributeCache.GetActionNameSelectorAttributes(methodInfo)
-                          where attrs.All(attr => attr.IsValidName(controllerContext, actionName, methodInfo))
-                          select methodInfo;
-            return methods.ToList();
-        }
-
-        private bool IsAsyncSuffixedMethod(MethodInfo methodInfo)
-        {
-            return _allowLegacyAsyncActions && methodInfo.Name.EndsWith("Async", StringComparison.OrdinalIgnoreCase);
-        }
-
-        private bool IsCompletedSuffixedMethod(MethodInfo methodInfo)
-        {
-            return _allowLegacyAsyncActions && methodInfo.Name.EndsWith("Completed", StringComparison.OrdinalIgnoreCase);
-        }
-
-        private static bool IsMethodDecoratedWithAliasingAttribute(MethodInfo methodInfo)
-        {
-            return methodInfo.IsDefined(typeof(ActionNameSelectorAttribute), true /* inherit */);
-        }
-
-        private MethodInfo GetMethodByName(string methodName)
-        {
-            List<MethodInfo> methods = (from MethodInfo methodInfo in ControllerType.GetMember(methodName, MemberTypes.Method, BindingFlags.Instance | BindingFlags.Public | BindingFlags.InvokeMethod | BindingFlags.IgnoreCase)
-                                        where IsValidActionMethod(methodInfo, false /* stripInfrastructureMethods */)
-                                        select methodInfo).ToList();
-
-            switch (methods.Count)
-            {
-                case 0:
-                    return null;
-
-                case 1:
-                    return methods[0];
-
-                default:
-                    throw CreateAmbiguousMethodMatchException(methods, methodName);
-            }
-        }
-
-        private bool IsValidActionMethod(MethodInfo methodInfo)
+        protected override bool IsValidActionMethod(MethodInfo methodInfo)
         {
             return IsValidActionMethod(methodInfo, true /* stripInfrastructureMethods */);
         }
@@ -191,39 +98,41 @@ namespace System.Web.Mvc.Async
             return true;
         }
 
-        private void PopulateLookupTables()
+        protected override string GetCanonicalMethodName(MethodInfo methodInfo)
         {
-            MethodInfo[] allMethods = ControllerType.GetMethods(BindingFlags.InvokeMethod | BindingFlags.Instance | BindingFlags.Public);
-            MethodInfo[] actionMethods = Array.FindAll(allMethods, IsValidActionMethod);
-
-            AliasedMethods = Array.FindAll(actionMethods, IsMethodDecoratedWithAliasingAttribute);
-            NonAliasedMethods = actionMethods.Except(AliasedMethods).ToLookup(GetCanonicalMethodName, StringComparer.OrdinalIgnoreCase);
+            string methodName = methodInfo.Name;
+            return (IsAsyncSuffixedMethod(methodInfo))
+                       ? methodName.Substring(0, methodName.Length - "Async".Length)
+                       : methodName;
         }
 
-        private static List<MethodInfo> RunSelectionFilters(ControllerContext controllerContext, List<MethodInfo> methodInfos)
+        private bool IsAsyncSuffixedMethod(MethodInfo methodInfo)
         {
-            // remove all methods which are opting out of this request
-            // to opt out, at least one attribute defined on the method must return false
+            return _allowLegacyAsyncActions && methodInfo.Name.EndsWith("Async", StringComparison.OrdinalIgnoreCase);
+        }
 
-            List<MethodInfo> matchesWithSelectionAttributes = new List<MethodInfo>();
-            List<MethodInfo> matchesWithoutSelectionAttributes = new List<MethodInfo>();
+        private bool IsCompletedSuffixedMethod(MethodInfo methodInfo)
+        {
+            return _allowLegacyAsyncActions && methodInfo.Name.EndsWith("Completed", StringComparison.OrdinalIgnoreCase);
+        }
 
-            foreach (MethodInfo methodInfo in methodInfos)
+        private MethodInfo GetMethodByName(string methodName)
+        {
+            List<MethodInfo> methods = (from MethodInfo methodInfo in ControllerType.GetMember(methodName, MemberTypes.Method, BindingFlags.Instance | BindingFlags.Public | BindingFlags.InvokeMethod | BindingFlags.IgnoreCase)
+                                        where IsValidActionMethod(methodInfo, false /* stripInfrastructureMethods */)
+                                        select methodInfo).ToList();
+
+            switch (methods.Count)
             {
-                ICollection<ActionMethodSelectorAttribute> attrs = ReflectedAttributeCache.GetActionMethodSelectorAttributes(methodInfo);
-                if (attrs.Count == 0)
-                {
-                    matchesWithoutSelectionAttributes.Add(methodInfo);
-                }
-                else if (attrs.All(attr => attr.IsValidForRequest(controllerContext, methodInfo)))
-                {
-                    matchesWithSelectionAttributes.Add(methodInfo);
-                }
-            }
+                case 0:
+                    return null;
 
-            // if a matching action method had a selection attribute, consider it more specific than a matching action method
-            // without a selection attribute
-            return (matchesWithSelectionAttributes.Count > 0) ? matchesWithSelectionAttributes : matchesWithoutSelectionAttributes;
+                case 1:
+                    return methods[0];
+
+                default:
+                    throw CreateAmbiguousMethodMatchException(methods, methodName);
+            }
         }
     }
 }

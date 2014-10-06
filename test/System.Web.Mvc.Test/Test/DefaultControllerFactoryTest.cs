@@ -1,14 +1,16 @@
 ﻿// Copyright (c) Microsoft Open Technologies, Inc. All rights reserved. See License.txt in the project root for license information.
 
+using System.Collections.Generic;
 using System.Reflection;
+using System.Web.Mvc.Routing;
 using System.Web.Routing;
+using System.Web.Routing.Test;
 using System.Web.SessionState;
 using Microsoft.TestCommon;
 using Moq;
 
 namespace System.Web.Mvc.Test
 {
-    [CLSCompliant(false)]
     public class DefaultControllerFactoryTest
     {
         static DefaultControllerFactoryTest()
@@ -686,6 +688,77 @@ namespace System.Web.Mvc.Test
             Assert.Same(returnedController, expectedController);
         }
 
+        [Fact]
+        public void GetControllerType_WithMatchedDirectRoute_UseTargetMethodType()
+        {
+            // Arrange
+            var requestContext = new RequestContext();
+            requestContext.RouteData = new RouteData();
+            requestContext.RouteData.Route = DirectRouteTestHelpers.BuildDirectRouteFromMethod<WithRoutingAttributeController>(c => c.Action());
+            requestContext.RouteData.AddDirectRouteMatches();
+
+            var expectedControllerType = typeof(WithRoutingAttributeController);
+
+            var controllerActivator = new Mock<IControllerActivator>(MockBehavior.Strict).Object;
+            var activatorResolver = new Resolver<IControllerActivator>();
+
+            var factory = new DefaultControllerFactory(controllerActivator, activatorResolver, null);
+
+            // Act
+            // if it would not get the controller type from the DirectRoute, then it would not 
+            // be able to find any controller
+            var type = factory.GetControllerType(requestContext, controllerName: null);
+
+            // Assert
+            Assert.Equal(expectedControllerType, type);
+        }
+
+        [Fact]
+        public void GetControllerType_WithMatchedDirectRoute_UseControllerDescriptorType()
+        {
+            // Arrange
+            var requestContext = new RequestContext();
+            requestContext.RouteData = new RouteData();
+            requestContext.RouteData.Route = DirectRouteTestHelpers.BuildDirectRouteFromController<AttributeRouteAtControllerLevelController>();
+            requestContext.RouteData.AddDirectRouteMatches();
+
+            var expectedControllerType = typeof(AttributeRouteAtControllerLevelController);
+
+            var controllerActivator = new Mock<IControllerActivator>(MockBehavior.Strict).Object;
+            var activatorResolver = new Resolver<IControllerActivator>();
+
+            var factory = new DefaultControllerFactory(controllerActivator, activatorResolver, null);
+
+            // Act
+            // if it would not get the controller type from the DirectRoute, then it would not 
+            // be able to find any controller
+            var type = factory.GetControllerType(requestContext, controllerName: null);
+
+            // Assert
+            Assert.Equal(expectedControllerType, type);
+        }
+
+        [Fact]
+        public void GetControllerType_WithMultipleDirectRouteControllers_ThrowsInvalidOperationException()
+        {
+            // Arrange
+            var requestContext = new RequestContext();
+            requestContext.RouteData = new RouteData();
+            SubRouteCollection subRoutes = new SubRouteCollection();
+            DirectRouteTestHelpers.AddDirectRouteFromController<AttributeRouteAtControllerLevelController>(subRoutes);
+            DirectRouteTestHelpers.AddDirectRouteFromMethod<WithRoutingAttributeController>(subRoutes, c => c.Action());
+            requestContext.RouteData.Route = new RouteCollectionRoute(subRoutes);
+            requestContext.RouteData.AddDirectRouteMatches();
+
+            var controllerActivator = new Mock<IControllerActivator>(MockBehavior.Strict).Object;
+            var activatorResolver = new Resolver<IControllerActivator>();
+
+            var factory = new DefaultControllerFactory(controllerActivator, activatorResolver, null);
+
+            // Act & Assert
+            Assert.Throws<InvalidOperationException>(() => factory.GetControllerType(requestContext, controllerName: null));
+        }
+
         class NoParameterlessCtor : IController
         {
             public NoParameterlessCtor(int x)
@@ -766,5 +839,21 @@ namespace System.Web.Mvc.Test
     // GOOD: 'Controller' suffix should be case-insensitive
     public class Goodcontroller : Controller
     {
+    }
+
+    public class WithRoutingAttributeController : Controller
+    {
+        [Route("route")]
+        public void Action()
+        {
+        }
+    }
+
+    [Route("cool/{action}")]
+    public class AttributeRouteAtControllerLevelController : Controller
+    {
+        public void Action()
+        {
+        }
     }
 }

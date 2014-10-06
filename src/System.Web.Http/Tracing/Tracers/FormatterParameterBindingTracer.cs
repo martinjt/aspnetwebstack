@@ -11,6 +11,7 @@ using System.Web.Http.Controllers;
 using System.Web.Http.Metadata;
 using System.Web.Http.ModelBinding;
 using System.Web.Http.Properties;
+using System.Web.Http.Services;
 
 namespace System.Web.Http.Tracing.Tracers
 {
@@ -18,20 +19,26 @@ namespace System.Web.Http.Tracing.Tracers
     /// Tracer to wrap a <see cref="FormatterParameterBinding"/>.
     /// Its primary purpose is to intercept binding requests so that it can create tracers for the formatters.
     /// </summary>
-    internal class FormatterParameterBindingTracer : FormatterParameterBinding
+    internal class FormatterParameterBindingTracer : FormatterParameterBinding, IDecorator<FormatterParameterBinding>
     {
         private const string ExecuteBindingAsyncMethodName = "ExecuteBindingAsync";
 
-        private FormatterParameterBinding _innerBinding;
-        private ITraceWriter _traceWriter;
+        private readonly FormatterParameterBinding _innerBinding;
+        private readonly ITraceWriter _traceWriter;
 
-        public FormatterParameterBindingTracer(FormatterParameterBinding innerBinding, ITraceWriter traceWriter) : base(innerBinding.Descriptor, innerBinding.Formatters, innerBinding.BodyModelValidator)
+        public FormatterParameterBindingTracer(FormatterParameterBinding innerBinding, ITraceWriter traceWriter)
+            : base(innerBinding.Descriptor, innerBinding.Formatters, innerBinding.BodyModelValidator)
         {
             Contract.Assert(innerBinding != null);
             Contract.Assert(traceWriter != null);
 
             _innerBinding = innerBinding;
             _traceWriter = traceWriter;
+        }
+
+        public FormatterParameterBinding Inner
+        {
+            get { return _innerBinding; }
         }
 
         public override string ErrorMessage
@@ -44,14 +51,22 @@ namespace System.Web.Http.Tracing.Tracers
             get { return _innerBinding.WillReadBody; }
         }
 
-        public override Task<object> ReadContentAsync(HttpRequestMessage request, Type type, IEnumerable<MediaTypeFormatter> formatters, IFormatterLogger formatterLogger)
+        public override Task<object> ReadContentAsync(HttpRequestMessage request, Type type,
+            IEnumerable<MediaTypeFormatter> formatters, IFormatterLogger formatterLogger)
         {
             // Intercept this method solely to wrap formatters with request-aware formatter tracers
             // There is no other interception point where a request and a formatter are paired.
             return _innerBinding.ReadContentAsync(request, type, CreateFormatterTracers(request, formatters), formatterLogger);
         }
 
-        public override Task ExecuteBindingAsync(ModelMetadataProvider metadataProvider, HttpActionContext actionContext, CancellationToken cancellationToken)
+        public override Task<object> ReadContentAsync(HttpRequestMessage request, Type type,
+            IEnumerable<MediaTypeFormatter> formatters, IFormatterLogger formatterLogger, CancellationToken cancellationToken)
+        {
+            return _innerBinding.ReadContentAsync(request, type, formatters, formatterLogger, cancellationToken);
+        }
+
+        public override Task ExecuteBindingAsync(ModelMetadataProvider metadataProvider, HttpActionContext actionContext,
+            CancellationToken cancellationToken)
         {
             return _traceWriter.TraceBeginEndAsync(
                 actionContext.Request,

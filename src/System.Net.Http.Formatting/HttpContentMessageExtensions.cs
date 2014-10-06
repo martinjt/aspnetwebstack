@@ -9,6 +9,7 @@ using System.IO;
 using System.Linq;
 using System.Net.Http.Formatting.Parsers;
 using System.Net.Http.Headers;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Web.Http;
 
@@ -77,7 +78,7 @@ namespace System.Net.Http
         /// Read the <see cref="HttpContent"/> as an <see cref="HttpRequestMessage"/>.
         /// </summary>
         /// <param name="content">The content to read.</param>
-        /// <returns>The parsed <see cref="HttpRequestMessage"/> instance.</returns>
+        /// <returns>A task object representing reading the content as an <see cref="HttpRequestMessage"/>.</returns>
         public static Task<HttpRequestMessage> ReadAsHttpRequestMessageAsync(this HttpContent content)
         {
             return ReadAsHttpRequestMessageAsync(content, "http", DefaultBufferSize);
@@ -87,8 +88,19 @@ namespace System.Net.Http
         /// Read the <see cref="HttpContent"/> as an <see cref="HttpRequestMessage"/>.
         /// </summary>
         /// <param name="content">The content to read.</param>
+        /// <param name="cancellationToken">The token to monitor for cancellation requests.</param>
+        /// <returns>A task object representing reading the content as an <see cref="HttpRequestMessage"/>.</returns>
+        public static Task<HttpRequestMessage> ReadAsHttpRequestMessageAsync(this HttpContent content, CancellationToken cancellationToken)
+        {
+            return ReadAsHttpRequestMessageAsync(content, "http", DefaultBufferSize, cancellationToken);
+        }
+
+        /// <summary>
+        /// Read the <see cref="HttpContent"/> as an <see cref="HttpRequestMessage"/>.
+        /// </summary>
+        /// <param name="content">The content to read.</param>
         /// <param name="uriScheme">The URI scheme to use for the request URI.</param>
-        /// <returns>The parsed <see cref="HttpRequestMessage"/> instance.</returns>
+        /// <returns>A task object representing reading the content as an <see cref="HttpRequestMessage"/>.</returns>
         [SuppressMessage("Microsoft.Design", "CA1054:UriParametersShouldNotBeStrings", MessageId = "1#", Justification = "This is not a full URI but only the URI scheme")]
         public static Task<HttpRequestMessage> ReadAsHttpRequestMessageAsync(this HttpContent content, string uriScheme)
         {
@@ -99,10 +111,24 @@ namespace System.Net.Http
         /// Read the <see cref="HttpContent"/> as an <see cref="HttpRequestMessage"/>.
         /// </summary>
         /// <param name="content">The content to read.</param>
+        /// <param name="uriScheme">The URI scheme to use for the request URI.</param>
+        /// <param name="cancellationToken">The token to monitor for cancellation requests.</param>
+        /// <returns>A task object representing reading the content as an <see cref="HttpRequestMessage"/>.</returns>
+        [SuppressMessage("Microsoft.Design", "CA1054:UriParametersShouldNotBeStrings", MessageId = "1#", Justification = "This is not a full URI but only the URI scheme")]
+        public static Task<HttpRequestMessage> ReadAsHttpRequestMessageAsync(this HttpContent content, string uriScheme,
+            CancellationToken cancellationToken)
+        {
+            return ReadAsHttpRequestMessageAsync(content, uriScheme, DefaultBufferSize, cancellationToken);
+        }
+
+        /// <summary>
+        /// Read the <see cref="HttpContent"/> as an <see cref="HttpRequestMessage"/>.
+        /// </summary>
+        /// <param name="content">The content to read.</param>
         /// <param name="uriScheme">The URI scheme to use for the request URI (the 
         /// URI scheme is not actually part of the HTTP Request URI and so must be provided externally).</param>
         /// <param name="bufferSize">Size of the buffer.</param>
-        /// <returns>The parsed <see cref="HttpRequestMessage"/> instance.</returns>
+        /// <returns>A task object representing reading the content as an <see cref="HttpRequestMessage"/>.</returns>
         [SuppressMessage("Microsoft.Design", "CA1054:UriParametersShouldNotBeStrings", MessageId = "1#", Justification = "This is not a full URI but only the URI scheme")]
         public static Task<HttpRequestMessage> ReadAsHttpRequestMessageAsync(this HttpContent content, string uriScheme, int bufferSize)
         {
@@ -116,11 +142,47 @@ namespace System.Net.Http
         /// <param name="uriScheme">The URI scheme to use for the request URI (the 
         /// URI scheme is not actually part of the HTTP Request URI and so must be provided externally).</param>
         /// <param name="bufferSize">Size of the buffer.</param>
+        /// <param name="cancellationToken">The token to monitor for cancellation requests.</param>
+        /// <returns>A task object representing reading the content as an <see cref="HttpRequestMessage"/>.</returns>
+        [SuppressMessage("Microsoft.Design", "CA1054:UriParametersShouldNotBeStrings", MessageId = "1#", Justification = "This is not a full URI but only the URI scheme")]
+        public static Task<HttpRequestMessage> ReadAsHttpRequestMessageAsync(this HttpContent content, string uriScheme,
+            int bufferSize, CancellationToken cancellationToken)
+        {
+            return ReadAsHttpRequestMessageAsync(content, uriScheme, bufferSize,
+                HttpRequestHeaderParser.DefaultMaxHeaderSize, cancellationToken);
+        }
+
+        /// <summary>
+        /// Read the <see cref="HttpContent"/> as an <see cref="HttpRequestMessage"/>.
+        /// </summary>
+        /// <param name="content">The content to read.</param>
+        /// <param name="uriScheme">The URI scheme to use for the request URI (the 
+        /// URI scheme is not actually part of the HTTP Request URI and so must be provided externally).</param>
+        /// <param name="bufferSize">Size of the buffer.</param>
         /// <param name="maxHeaderSize">The max length of the HTTP header.</param>
-        /// <returns>The parsed <see cref="HttpRequestMessage"/> instance.</returns>
+        /// <returns>A task object representing reading the content as an <see cref="HttpRequestMessage"/>.</returns>
         [SuppressMessage("Microsoft.Design", "CA1054:UriParametersShouldNotBeStrings", MessageId = "1#", Justification = "This is not a full URI but only the URI scheme")]
         [SuppressMessage("Microsoft.Design", "CA1031:DoNotCatchGeneralExceptionTypes", Justification = "Exception translates to parser state.")]
-        public static Task<HttpRequestMessage> ReadAsHttpRequestMessageAsync(this HttpContent content, string uriScheme, int bufferSize, int maxHeaderSize)
+        public static Task<HttpRequestMessage> ReadAsHttpRequestMessageAsync(this HttpContent content, string uriScheme,
+            int bufferSize, int maxHeaderSize)
+        {
+            return ReadAsHttpRequestMessageAsync(content, uriScheme, bufferSize, maxHeaderSize, CancellationToken.None);
+        }
+
+        /// <summary>
+        /// Read the <see cref="HttpContent"/> as an <see cref="HttpRequestMessage"/>.
+        /// </summary>
+        /// <param name="content">The content to read.</param>
+        /// <param name="uriScheme">The URI scheme to use for the request URI (the 
+        /// URI scheme is not actually part of the HTTP Request URI and so must be provided externally).</param>
+        /// <param name="bufferSize">Size of the buffer.</param>
+        /// <param name="maxHeaderSize">The max length of the HTTP header.</param>
+        /// <param name="cancellationToken">The token to monitor for cancellation requests.</param>
+        /// <returns>A task object representing reading the content as an <see cref="HttpRequestMessage"/>.</returns>
+        [SuppressMessage("Microsoft.Design", "CA1054:UriParametersShouldNotBeStrings", MessageId = "1#", Justification = "This is not a full URI but only the URI scheme")]
+        [SuppressMessage("Microsoft.Design", "CA1031:DoNotCatchGeneralExceptionTypes", Justification = "Exception translates to parser state.")]
+        public static Task<HttpRequestMessage> ReadAsHttpRequestMessageAsync(this HttpContent content, string uriScheme,
+            int bufferSize, int maxHeaderSize, CancellationToken cancellationToken)
         {
             if (content == null)
             {
@@ -149,57 +211,64 @@ namespace System.Net.Http
 
             HttpMessageContent.ValidateHttpMessageContent(content, true, true);
 
-            return content.ReadAsStreamAsync().Then(stream =>
+            return content.ReadAsHttpRequestMessageAsyncCore(uriScheme, bufferSize, maxHeaderSize, cancellationToken);
+        }
+
+        private static async Task<HttpRequestMessage> ReadAsHttpRequestMessageAsyncCore(this HttpContent content,
+            string uriScheme, int bufferSize, int maxHeaderSize, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Stream stream = await content.ReadAsStreamAsync();
+
+            HttpUnsortedRequest httpRequest = new HttpUnsortedRequest();
+            HttpRequestHeaderParser parser = new HttpRequestHeaderParser(httpRequest,
+                HttpRequestHeaderParser.DefaultMaxRequestLineSize, maxHeaderSize);
+            ParserState parseStatus;
+
+            byte[] buffer = new byte[bufferSize];
+            int bytesRead = 0;
+            int headerConsumed = 0;
+
+            while (true)
             {
-                HttpUnsortedRequest httpRequest = new HttpUnsortedRequest();
-                HttpRequestHeaderParser parser = new HttpRequestHeaderParser(httpRequest, HttpRequestHeaderParser.DefaultMaxRequestLineSize, maxHeaderSize);
-                ParserState parseStatus;
-
-                byte[] buffer = new byte[bufferSize];
-                int bytesRead = 0;
-                int headerConsumed = 0;
-
-                while (true)
+                try
                 {
-                    try
-                    {
-                        bytesRead = stream.Read(buffer, 0, buffer.Length);
-                    }
-                    catch (Exception e)
-                    {
-                        throw new IOException(Properties.Resources.HttpMessageErrorReading, e);
-                    }
-
-                    try
-                    {
-                        parseStatus = parser.ParseBuffer(buffer, bytesRead, ref headerConsumed);
-                    }
-                    catch (Exception)
-                    {
-                        parseStatus = ParserState.Invalid;
-                    }
-
-                    if (parseStatus == ParserState.Done)
-                    {
-                        return CreateHttpRequestMessage(uriScheme, httpRequest, stream, bytesRead - headerConsumed);
-                    }
-                    else if (parseStatus != ParserState.NeedMoreData)
-                    {
-                        throw Error.InvalidOperation(Properties.Resources.HttpMessageParserError, headerConsumed, buffer);
-                    }
-                    else if (bytesRead == 0)
-                    {
-                        throw new IOException(Properties.Resources.ReadAsHttpMessageUnexpectedTermination);
-                    }
+                    bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length, cancellationToken);
                 }
-            });
+                catch (Exception e)
+                {
+                    throw new IOException(Properties.Resources.HttpMessageErrorReading, e);
+                }
+
+                try
+                {
+                    parseStatus = parser.ParseBuffer(buffer, bytesRead, ref headerConsumed);
+                }
+                catch (Exception)
+                {
+                    parseStatus = ParserState.Invalid;
+                }
+
+                if (parseStatus == ParserState.Done)
+                {
+                    return CreateHttpRequestMessage(uriScheme, httpRequest, stream, bytesRead - headerConsumed);
+                }
+                else if (parseStatus != ParserState.NeedMoreData)
+                {
+                    throw Error.InvalidOperation(Properties.Resources.HttpMessageParserError, headerConsumed, buffer);
+                }
+                else if (bytesRead == 0)
+                {
+                    throw new IOException(Properties.Resources.ReadAsHttpMessageUnexpectedTermination);
+                }
+            }
         }
 
         /// <summary>
         /// Read the <see cref="HttpContent"/> as an <see cref="HttpResponseMessage"/>.
         /// </summary>
         /// <param name="content">The content to read.</param>
-        /// <returns>The parsed <see cref="HttpResponseMessage"/> instance.</returns>
+        /// <returns>A task object representing reading the content as an <see cref="HttpResponseMessage"/>.</returns>
         public static Task<HttpResponseMessage> ReadAsHttpResponseMessageAsync(this HttpContent content)
         {
             return ReadAsHttpResponseMessageAsync(content, DefaultBufferSize);
@@ -209,8 +278,19 @@ namespace System.Net.Http
         /// Read the <see cref="HttpContent"/> as an <see cref="HttpResponseMessage"/>.
         /// </summary>
         /// <param name="content">The content to read.</param>
+        /// <param name="cancellationToken">The token to monitor for cancellation requests.</param>
+        /// <returns>A task object representing reading the content as an <see cref="HttpResponseMessage"/>.</returns>
+        public static Task<HttpResponseMessage> ReadAsHttpResponseMessageAsync(this HttpContent content, CancellationToken cancellationToken)
+        {
+            return ReadAsHttpResponseMessageAsync(content, DefaultBufferSize, cancellationToken);
+        }
+
+        /// <summary>
+        /// Read the <see cref="HttpContent"/> as an <see cref="HttpResponseMessage"/>.
+        /// </summary>
+        /// <param name="content">The content to read.</param>
         /// <param name="bufferSize">Size of the buffer.</param>
-        /// <returns>The parsed <see cref="HttpResponseMessage"/> instance.</returns>
+        /// <returns>A task object representing reading the content as an <see cref="HttpResponseMessage"/>.</returns>
         public static Task<HttpResponseMessage> ReadAsHttpResponseMessageAsync(this HttpContent content, int bufferSize)
         {
             return ReadAsHttpResponseMessageAsync(content, bufferSize, HttpResponseHeaderParser.DefaultMaxHeaderSize);
@@ -221,10 +301,39 @@ namespace System.Net.Http
         /// </summary>
         /// <param name="content">The content to read.</param>
         /// <param name="bufferSize">Size of the buffer.</param>
+        /// <param name="cancellationToken">The token to monitor for cancellation requests.</param>
+        /// <returns>A task object representing reading the content as an <see cref="HttpResponseMessage"/>.</returns>
+        public static Task<HttpResponseMessage> ReadAsHttpResponseMessageAsync(this HttpContent content, int bufferSize,
+            CancellationToken cancellationToken)
+        {
+            return ReadAsHttpResponseMessageAsync(content, bufferSize, HttpResponseHeaderParser.DefaultMaxHeaderSize, cancellationToken);
+        }
+
+        /// <summary>
+        /// Read the <see cref="HttpContent"/> as an <see cref="HttpResponseMessage"/>.
+        /// </summary>
+        /// <param name="content">The content to read.</param>
+        /// <param name="bufferSize">Size of the buffer.</param>
         /// <param name="maxHeaderSize">The max length of the HTTP header.</param>
+        /// <returns>A task object representing reading the content as an <see cref="HttpResponseMessage"/>.</returns>
+        [SuppressMessage("Microsoft.Design", "CA1031:DoNotCatchGeneralExceptionTypes", Justification = "Exception translates to parser state.")]
+        public static Task<HttpResponseMessage> ReadAsHttpResponseMessageAsync(this HttpContent content, int bufferSize,
+            int maxHeaderSize)
+        {
+            return ReadAsHttpResponseMessageAsync(content, bufferSize, maxHeaderSize, CancellationToken.None);
+        }
+
+        /// <summary>
+        /// Read the <see cref="HttpContent"/> as an <see cref="HttpResponseMessage"/>.
+        /// </summary>
+        /// <param name="content">The content to read.</param>
+        /// <param name="bufferSize">Size of the buffer.</param>
+        /// <param name="maxHeaderSize">The max length of the HTTP header.</param>
+        /// <param name="cancellationToken">The token to monitor for cancellation requests.</param>
         /// <returns>The parsed <see cref="HttpResponseMessage"/> instance.</returns>
         [SuppressMessage("Microsoft.Design", "CA1031:DoNotCatchGeneralExceptionTypes", Justification = "Exception translates to parser state.")]
-        public static Task<HttpResponseMessage> ReadAsHttpResponseMessageAsync(this HttpContent content, int bufferSize, int maxHeaderSize)
+        public static Task<HttpResponseMessage> ReadAsHttpResponseMessageAsync(this HttpContent content, int bufferSize,
+            int maxHeaderSize, CancellationToken cancellationToken)
         {
             if (content == null)
             {
@@ -243,51 +352,57 @@ namespace System.Net.Http
 
             HttpMessageContent.ValidateHttpMessageContent(content, false, true);
 
-            return content.ReadAsStreamAsync().Then(stream =>
+            return content.ReadAsHttpResponseMessageAsyncCore(bufferSize, maxHeaderSize, cancellationToken);
+        }
+
+        private static async Task<HttpResponseMessage> ReadAsHttpResponseMessageAsyncCore(this HttpContent content,
+            int bufferSize, int maxHeaderSize, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Stream stream = await content.ReadAsStreamAsync();
+
+            HttpUnsortedResponse httpResponse = new HttpUnsortedResponse();
+            HttpResponseHeaderParser parser = new HttpResponseHeaderParser(httpResponse, HttpResponseHeaderParser.DefaultMaxStatusLineSize, maxHeaderSize);
+            ParserState parseStatus;
+
+            byte[] buffer = new byte[bufferSize];
+            int bytesRead = 0;
+            int headerConsumed = 0;
+
+            while (true)
             {
-                HttpUnsortedResponse httpResponse = new HttpUnsortedResponse();
-                HttpResponseHeaderParser parser = new HttpResponseHeaderParser(httpResponse, HttpResponseHeaderParser.DefaultMaxStatusLineSize, maxHeaderSize);
-                ParserState parseStatus;
-
-                byte[] buffer = new byte[bufferSize];
-                int bytesRead = 0;
-                int headerConsumed = 0;
-
-                while (true)
+                try
                 {
-                    try
-                    {
-                        bytesRead = stream.Read(buffer, 0, buffer.Length);
-                    }
-                    catch (Exception e)
-                    {
-                        throw new IOException(Properties.Resources.HttpMessageErrorReading, e);
-                    }
-
-                    try
-                    {
-                        parseStatus = parser.ParseBuffer(buffer, bytesRead, ref headerConsumed);
-                    }
-                    catch (Exception)
-                    {
-                        parseStatus = ParserState.Invalid;
-                    }
-
-                    if (parseStatus == ParserState.Done)
-                    {
-                        // Create and return parsed HttpResponseMessage
-                        return CreateHttpResponseMessage(httpResponse, stream, bytesRead - headerConsumed);
-                    }
-                    else if (parseStatus != ParserState.NeedMoreData)
-                    {
-                        throw Error.InvalidOperation(Properties.Resources.HttpMessageParserError, headerConsumed, buffer);
-                    }
-                    else if (bytesRead == 0)
-                    {
-                        throw new IOException(Properties.Resources.ReadAsHttpMessageUnexpectedTermination);
-                    }
+                    bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length, cancellationToken);
                 }
-            });
+                catch (Exception e)
+                {
+                    throw new IOException(Properties.Resources.HttpMessageErrorReading, e);
+                }
+
+                try
+                {
+                    parseStatus = parser.ParseBuffer(buffer, bytesRead, ref headerConsumed);
+                }
+                catch (Exception)
+                {
+                    parseStatus = ParserState.Invalid;
+                }
+
+                if (parseStatus == ParserState.Done)
+                {
+                    // Create and return parsed HttpResponseMessage
+                    return CreateHttpResponseMessage(httpResponse, stream, bytesRead - headerConsumed);
+                }
+                else if (parseStatus != ParserState.NeedMoreData)
+                {
+                    throw Error.InvalidOperation(Properties.Resources.HttpMessageParserError, headerConsumed, buffer);
+                }
+                else if (bytesRead == 0)
+                {
+                    throw new IOException(Properties.Resources.ReadAsHttpMessageUnexpectedTermination);
+                }
+            }
         }
 
         /// <summary>

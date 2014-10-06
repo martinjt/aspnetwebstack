@@ -1,11 +1,17 @@
 ﻿// Copyright (c) Microsoft Open Technologies, Inc. All rights reserved. See License.txt in the project root for license information.
 
+using System.Collections.Generic;
+using System.Diagnostics.Contracts;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
+using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Web.Http.Controllers;
+using System.Web.Http.ExceptionHandling;
 using System.Web.Http.Hosting;
+using System.Web.Http.Results;
 using System.Web.Http.Routing;
 using Microsoft.TestCommon;
 using Moq;
@@ -20,6 +26,91 @@ namespace System.Web.Http.Dispatcher
             Assert.ThrowsArgumentNull(
                 () => new HttpControllerDispatcher(configuration: null),
                 "configuration");
+        }
+
+        [Fact]
+        public void ExceptionLoggerGet_ReturnsSpecifiedInstance()
+        {
+            // Arrange
+            IExceptionLogger expectedExceptionLogger = CreateDummyExceptionLogger();
+            IExceptionHandler exceptionHandler = CreateDummyExceptionHandler();
+
+            using (HttpConfiguration configuration = CreateConfiguration())
+            using (HttpControllerDispatcher product = CreateProductUnderTest(configuration, expectedExceptionLogger,
+                exceptionHandler))
+            {
+                // Act
+                IExceptionLogger exceptionLogger = product.ExceptionLogger;
+
+                // Assert
+                Assert.Same(expectedExceptionLogger, exceptionLogger);
+            }
+        }
+
+        [Fact]
+        public void ExceptionHandlerGet_ReturnsSpecifiedInstance()
+        {
+            // Arrange
+            IExceptionLogger exceptionLogger = CreateDummyExceptionLogger();
+            IExceptionHandler expectedExceptionHandler = CreateDummyExceptionHandler();
+
+            using (HttpConfiguration configuration = CreateConfiguration())
+            using (HttpControllerDispatcher product = CreateProductUnderTest(configuration, exceptionLogger,
+                expectedExceptionHandler))
+            {
+                // Act
+                IExceptionHandler exceptionHandler = product.ExceptionHandler;
+
+                // Assert
+                Assert.Same(expectedExceptionHandler, exceptionHandler);
+            }
+        }
+
+        [Fact]
+        public void ExceptionLoggerGet_IfUnset_ReturnsExceptionLoggerFromConfiguration()
+        {
+            // Arrange
+            using (HttpConfiguration configuration = CreateConfiguration())
+            {
+                IExceptionLogger expectedExceptionLogger = CreateDummyExceptionLogger();
+                configuration.Services.Add(typeof(IExceptionLogger), expectedExceptionLogger);
+
+                using (HttpControllerDispatcher product = CreateProductUnderTest(configuration))
+                {
+                    // Act
+                    IExceptionLogger exceptionLogger = product.ExceptionLogger;
+
+                    // Assert
+                    Assert.IsType<CompositeExceptionLogger>(exceptionLogger);
+                    CompositeExceptionLogger compositeLogger = (CompositeExceptionLogger)exceptionLogger;
+                    IEnumerable<IExceptionLogger> loggers = compositeLogger.Loggers;
+                    Assert.NotNull(loggers);
+                    Assert.Equal(1, loggers.Count());
+                    Assert.Same(expectedExceptionLogger, loggers.Single());
+                }
+            }
+        }
+
+        [Fact]
+        public void ExceptionHandlerGet_IfUnset_UsesExceptionHandlerFromConfiguration()
+        {
+            // Arrange
+            using (HttpConfiguration configuration = CreateConfiguration())
+            {
+                IExceptionHandler expectedExceptionHandler = CreateDummyExceptionHandler();
+                configuration.Services.Replace(typeof(IExceptionHandler), expectedExceptionHandler);
+
+                using (HttpControllerDispatcher product = CreateProductUnderTest(configuration))
+                {
+                    // Act
+                    IExceptionHandler exceptionHandler = product.ExceptionHandler;
+
+                    // Assert
+                    Assert.IsType<LastChanceExceptionHandler>(exceptionHandler);
+                    LastChanceExceptionHandler lastChanceHandler = (LastChanceExceptionHandler)exceptionHandler;
+                    Assert.Same(expectedExceptionHandler, lastChanceHandler.InnerHandler);
+                }
+            }
         }
 
         [Fact]
@@ -102,8 +193,233 @@ namespace System.Web.Http.Dispatcher
             Assert.Equal(HttpStatusCode.NotFound, resultTask.Result.StatusCode);
         }
 
+        // In this case the controller selector throws, so we don't get a controller context in the
+        // exception handlers. 
         [Fact]
-        public void SendAsync_Returns500WithHttpErrorWhenControllerThrows()
+        public void SendAsync_IfSendAsyncThrows_InControllerSelector_CallsExceptionServices()
+        {
+            // Arrange
+            Exception expectedException = CreateException();
+
+            Mock<IExceptionLogger> exceptionLoggerMock = CreateStubExceptionLoggerMock();
+            IExceptionLogger exceptionLogger = exceptionLoggerMock.Object;
+
+            Mock<IExceptionHandler> exceptionHandlerMock = CreateStubExceptionHandlerMock();
+            IExceptionHandler exceptionHandler = exceptionHandlerMock.Object;
+
+            using (HttpRequestMessage expectedRequest = CreateRequestWithRouteData())
+            using (HttpConfiguration configuration = CreateConfiguration())
+            using (HttpMessageHandler product = CreateProductUnderTest(configuration, exceptionLogger,
+                exceptionHandler))
+            {
+                configuration.Services.Replace(typeof(IHttpControllerSelector),
+                    CreateThrowingControllerSelector(expectedException));
+
+                CancellationToken cancellationToken = CreateCancellationToken();
+
+                Task<HttpResponseMessage> task = product.SendAsync(expectedRequest, cancellationToken);
+
+                // Act
+                task.WaitUntilCompleted();
+
+                // Assert
+                Func<ExceptionContext, bool> exceptionContextMatches = (c) =>
+                    c != null
+                    && c.Exception == expectedException
+                    && c.CatchBlock == ExceptionCatchBlocks.HttpControllerDispatcher
+                    && c.Request == expectedRequest
+                    && c.ControllerContext == null;
+
+                exceptionLoggerMock.Verify(l => l.LogAsync(
+                    It.Is<ExceptionLoggerContext>(c => exceptionContextMatches(c.ExceptionContext)),
+                    cancellationToken), Times.Once());
+
+                exceptionHandlerMock.Verify(h => h.HandleAsync(
+                    It.Is<ExceptionHandlerContext>((c) => exceptionContextMatches(c.ExceptionContext)),
+                    cancellationToken), Times.Once());
+            }
+        }
+
+        // In this case the controller itself throws, so we get a controller context in the
+        // exception handlers. 
+        [Fact]
+        public void SendAsync_IfSendAsyncThrows_Controller_CallsExceptionServices()
+        {
+            // Arrange
+            Exception expectedException = CreateException();
+
+            Mock<IExceptionLogger> exceptionLoggerMock = CreateStubExceptionLoggerMock();
+            IExceptionLogger exceptionLogger = exceptionLoggerMock.Object;
+
+            Mock<IExceptionHandler> exceptionHandlerMock = CreateStubExceptionHandlerMock();
+            IExceptionHandler exceptionHandler = exceptionHandlerMock.Object;
+
+            var controller = new ThrowingController(expectedException);
+
+            var controllerActivator = new Mock<IHttpControllerActivator>();
+            controllerActivator
+                .Setup(
+                    activator => activator.Create(
+                        It.IsAny<HttpRequestMessage>(), 
+                        It.IsAny<HttpControllerDescriptor>(), 
+                        It.IsAny<Type>()))
+                .Returns(controller);
+
+            using (HttpRequestMessage expectedRequest = CreateRequestWithRouteData())
+            using (HttpConfiguration configuration = CreateConfiguration())
+            using (HttpMessageHandler product = CreateProductUnderTest(configuration, exceptionLogger,
+                exceptionHandler))
+            {
+                var controllerSelector = new Mock<IHttpControllerSelector>(MockBehavior.Strict);
+                controllerSelector
+                    .Setup(selector => selector.SelectController(It.IsAny<HttpRequestMessage>()))
+                    .Returns(new HttpControllerDescriptor(configuration, "Throwing", controller.GetType()));
+
+                configuration.Services.Replace(typeof(IHttpControllerSelector), controllerSelector.Object);
+                configuration.Services.Replace(typeof(IHttpControllerActivator), controllerActivator.Object);
+
+                CancellationToken cancellationToken = CreateCancellationToken();
+
+                Task<HttpResponseMessage> task = product.SendAsync(expectedRequest, cancellationToken);
+
+                // Act
+                task.WaitUntilCompleted();
+
+                // Assert
+                Func<ExceptionContext, bool> exceptionContextMatches = (c) =>
+                    c != null
+                    && c.Exception == expectedException
+                    && c.CatchBlock == ExceptionCatchBlocks.HttpControllerDispatcher
+                    && c.Request == expectedRequest
+                    && c.ControllerContext != null
+                    && c.ControllerContext == controller.ControllerContext
+                    && c.ControllerContext.Controller == controller;
+
+                exceptionLoggerMock.Verify(l => l.LogAsync(
+                    It.Is<ExceptionLoggerContext>(c => exceptionContextMatches(c.ExceptionContext)),
+                    cancellationToken), Times.Once());
+
+                exceptionHandlerMock.Verify(h => h.HandleAsync(
+                    It.Is<ExceptionHandlerContext>((c) => exceptionContextMatches(c.ExceptionContext)),
+                    cancellationToken), Times.Once());
+            }
+        }
+
+
+        [Fact]
+        public void SendAsync_IfSendAsyncCancels_InControllerSelector_DoesNotCallExceptionServices()
+        {
+            // Arrange
+            Exception expectedException = new OperationCanceledException();
+
+            Mock<IExceptionLogger> exceptionLoggerMock = new Mock<IExceptionLogger>(MockBehavior.Strict);
+            IExceptionLogger exceptionLogger = exceptionLoggerMock.Object;
+
+            Mock<IExceptionHandler> exceptionHandlerMock = new Mock<IExceptionHandler>(MockBehavior.Strict);
+            IExceptionHandler exceptionHandler = exceptionHandlerMock.Object;
+
+            using (HttpRequestMessage expectedRequest = CreateRequestWithRouteData())
+            using (HttpConfiguration configuration = CreateConfiguration())
+            using (HttpMessageHandler product = CreateProductUnderTest(configuration, exceptionLogger,
+                exceptionHandler))
+            {
+                configuration.Services.Replace(typeof(IHttpControllerSelector),
+                    CreateThrowingControllerSelector(expectedException));
+
+                CancellationToken cancellationToken = CreateCancellationToken();
+
+                Task<HttpResponseMessage> task = product.SendAsync(expectedRequest, cancellationToken);
+
+                // Act
+                task.WaitUntilCompleted();
+
+                // Assert
+                Assert.Equal(TaskStatus.Canceled, task.Status);
+            }
+        }
+
+        [Fact]
+        public void SendAsync_IfExceptionHandlerSetsNullResult_PropogatesFaultedTaskException()
+        {
+            // Arrange
+            ExceptionDispatchInfo exceptionInfo = CreateExceptionInfo();
+            string expectedStackTrace = exceptionInfo.SourceException.StackTrace;
+
+            IExceptionLogger exceptionLogger = CreateStubExceptionLogger();
+
+            Mock<IExceptionHandler> exceptionHandlerMock = new Mock<IExceptionHandler>(MockBehavior.Strict);
+            exceptionHandlerMock
+                .Setup(h => h.HandleAsync(It.IsAny<ExceptionHandlerContext>(), It.IsAny<CancellationToken>()))
+                .Callback<ExceptionHandlerContext, CancellationToken>((c, i) => c.Result = null)
+                .Returns(Task.FromResult(0));
+            IExceptionHandler exceptionHandler = exceptionHandlerMock.Object;
+
+            using (HttpRequestMessage request = CreateRequestWithRouteData())
+            using (HttpConfiguration configuration = CreateConfiguration())
+            using (HttpMessageHandler product = CreateProductUnderTest(configuration, exceptionLogger,
+                exceptionHandler))
+            {
+                configuration.Services.Replace(typeof(IHttpControllerSelector),
+                    CreateThrowingControllerSelector(exceptionInfo));
+
+                CancellationToken cancellationToken = CreateCancellationToken();
+
+                Task<HttpResponseMessage> task = product.SendAsync(request, cancellationToken);
+
+                // Act
+                task.WaitUntilCompleted();
+
+                // Assert
+                Assert.Equal(TaskStatus.Faulted, task.Status);
+                Assert.NotNull(task.Exception);
+                Exception exception = task.Exception.GetBaseException();
+                Assert.Same(exceptionInfo.SourceException, exception);
+                Assert.NotNull(exception.StackTrace);
+                Assert.True(exception.StackTrace.StartsWith(expectedStackTrace));
+            }
+        }
+
+        [Fact]
+        public void SendAsync_IfExceptionHandlerHandlesException_ReturnsResponse()
+        {
+            // Arrange
+            IExceptionLogger exceptionLogger = CreateStubExceptionLogger();
+
+            using (HttpResponseMessage expectedResponse = CreateResponse())
+            {
+                Mock<IExceptionHandler> exceptionHandlerMock = new Mock<IExceptionHandler>(MockBehavior.Strict);
+                exceptionHandlerMock
+                    .Setup(h => h.HandleAsync(It.IsAny<ExceptionHandlerContext>(), It.IsAny<CancellationToken>()))
+                    .Callback<ExceptionHandlerContext, CancellationToken>((c, i) =>
+                        c.Result = new ResponseMessageResult(expectedResponse))
+                    .Returns(Task.FromResult(0));
+                IExceptionHandler exceptionHandler = exceptionHandlerMock.Object;
+
+                using (HttpRequestMessage request = CreateRequestWithRouteData())
+                using (HttpConfiguration configuration = new HttpConfiguration())
+                using (HttpMessageHandler product = CreateProductUnderTest(configuration, exceptionLogger,
+                    exceptionHandler))
+                {
+                    configuration.Services.Replace(typeof(IHttpControllerSelector),
+                        CreateThrowingControllerSelector(CreateException()));
+
+                    CancellationToken cancellationToken = CreateCancellationToken();
+
+                    Task<HttpResponseMessage> task = product.SendAsync(request, cancellationToken);
+
+                    // Act
+                    task.WaitUntilCompleted();
+
+                    // Assert
+                    Assert.Equal(TaskStatus.RanToCompletion, task.Status);
+                    HttpResponseMessage response = task.Result;
+                    Assert.Same(expectedResponse, response);
+                }
+            }
+        }
+
+        [Fact]
+        public void SendAsync_IfExceptionHandlerIsDefault_Returns500WithHttpErrorWhenControllerThrows()
         {
             var config = new HttpConfiguration() { IncludeErrorDetailPolicy = IncludeErrorDetailPolicy.Always };
             var request = CreateRequest(config, "http://localhost/api/HttpControllerDispatcherThrowing");
@@ -119,13 +435,232 @@ namespace System.Web.Http.Dispatcher
             Assert.Equal("Hello from the throwing controller", error["ExceptionMessage"]);
         }
 
+        [Fact]
+        public void SendAsync_CreatesControllerContext_WithRequestContextFromRequest()
+        {
+            // Arrange
+            using (HttpConfiguration configuration = new HttpConfiguration())
+            using (HttpControllerDispatcher dispatcher = new HttpControllerDispatcher(configuration))
+            using (HttpMessageInvoker invoker = new HttpMessageInvoker(dispatcher))
+            using (HttpRequestMessage request = new HttpRequestMessage())
+            {
+                Mock<IHttpController> controllerMock = new Mock<IHttpController>();
+                HttpRequestContext requestContext = null;
+                controllerMock
+                    .Setup(c => c.ExecuteAsync(It.IsAny<HttpControllerContext>(), CancellationToken.None))
+                    .Callback<HttpControllerContext, CancellationToken>((c, t) =>
+                    {
+                        requestContext = c.RequestContext;
+                    });
+                Mock<HttpControllerDescriptor> controllerDescriptorMock = new Mock<HttpControllerDescriptor>();
+                controllerDescriptorMock.Setup(d => d.CreateController(request)).Returns(controllerMock.Object);
+                HttpControllerDescriptor controllerDescriptor = controllerDescriptorMock.Object;
+                controllerDescriptor.Configuration = configuration;
+                Mock<IHttpControllerSelector> controllerSelectorMock = new Mock<IHttpControllerSelector>();
+                controllerSelectorMock.Setup(s => s.SelectController(request)).Returns(controllerDescriptor);
+                configuration.Services.Replace(typeof(IHttpControllerSelector), controllerSelectorMock.Object);
+
+                HttpRequestContext expectedRequestContext = new HttpRequestContext
+                {
+                    Configuration = configuration
+                };
+                request.SetRequestContext(expectedRequestContext);
+
+                request.SetRouteData(new Mock<IHttpRouteData>(MockBehavior.Strict).Object);
+
+                // Act
+                HttpResponseMessage ignore = invoker.SendAsync(request, CancellationToken.None).Result;
+
+                // Assert
+                Assert.Same(expectedRequestContext, requestContext);
+            }
+        }
+
+        [Fact]
+        public void SendAsync_CreatesControllerContextWithRequestBackedRequestContext_WhenRequestRequestContextIsNull()
+        {
+            // Arrange
+            using (HttpConfiguration configuration = new HttpConfiguration())
+            using (HttpControllerDispatcher dispatcher = new HttpControllerDispatcher(configuration))
+            using (HttpMessageInvoker invoker = new HttpMessageInvoker(dispatcher))
+            using (HttpRequestMessage request = new HttpRequestMessage())
+            {
+                Mock<IHttpController> controllerMock = new Mock<IHttpController>();
+                HttpRequestContext requestContext = null;
+                controllerMock
+                    .Setup(c => c.ExecuteAsync(It.IsAny<HttpControllerContext>(), CancellationToken.None))
+                    .Callback<HttpControllerContext, CancellationToken>((c, t) =>
+                    {
+                        requestContext = c.RequestContext;
+                    });
+                Mock<HttpControllerDescriptor> controllerDescriptorMock = new Mock<HttpControllerDescriptor>();
+                controllerDescriptorMock.Setup(d => d.CreateController(request)).Returns(controllerMock.Object);
+                HttpControllerDescriptor controllerDescriptor = controllerDescriptorMock.Object;
+                controllerDescriptor.Configuration = configuration;
+                Mock<IHttpControllerSelector> controllerSelectorMock = new Mock<IHttpControllerSelector>();
+                controllerSelectorMock.Setup(s => s.SelectController(request)).Returns(controllerDescriptor);
+                configuration.Services.Replace(typeof(IHttpControllerSelector), controllerSelectorMock.Object);
+
+                request.SetRouteData(new Mock<IHttpRouteData>(MockBehavior.Strict).Object);
+
+                // Act
+                HttpResponseMessage ignore = invoker.SendAsync(request, CancellationToken.None).Result;
+
+                // Assert
+                Assert.IsType<RequestBackedHttpRequestContext>(requestContext);
+                RequestBackedHttpRequestContext typedRequestContext = (RequestBackedHttpRequestContext)requestContext;
+                Assert.Same(request, typedRequestContext.Request);
+                Assert.Same(configuration, typedRequestContext.Configuration);
+            }
+        }
+
+        [Fact]
+        public void SendAsync_SetsRequestBackedRequestContextOnRequest_WhenRequestRequestContextIsNull()
+        {
+            // Arrange
+            using (HttpConfiguration configuration = new HttpConfiguration())
+            using (HttpControllerDispatcher dispatcher = new HttpControllerDispatcher(configuration))
+            using (HttpMessageInvoker invoker = new HttpMessageInvoker(dispatcher))
+            using (HttpRequestMessage request = new HttpRequestMessage())
+            {
+                Mock<IHttpController> controllerMock = new Mock<IHttpController>();
+                HttpRequestContext requestContext = null;
+                controllerMock
+                    .Setup(c => c.ExecuteAsync(It.IsAny<HttpControllerContext>(), CancellationToken.None))
+                    .Callback<HttpControllerContext, CancellationToken>((c, t) =>
+                    {
+                        requestContext = request.GetRequestContext();
+                    });
+                Mock<HttpControllerDescriptor> controllerDescriptorMock = new Mock<HttpControllerDescriptor>();
+                controllerDescriptorMock.Setup(d => d.CreateController(request)).Returns(controllerMock.Object);
+                HttpControllerDescriptor controllerDescriptor = controllerDescriptorMock.Object;
+                controllerDescriptor.Configuration = configuration;
+                Mock<IHttpControllerSelector> controllerSelectorMock = new Mock<IHttpControllerSelector>();
+                controllerSelectorMock.Setup(s => s.SelectController(request)).Returns(controllerDescriptor);
+                configuration.Services.Replace(typeof(IHttpControllerSelector), controllerSelectorMock.Object);
+
+                request.SetRouteData(new Mock<IHttpRouteData>(MockBehavior.Strict).Object);
+
+                // Act
+                HttpResponseMessage ignore = invoker.SendAsync(request, CancellationToken.None).Result;
+
+                // Assert
+                Assert.IsType<RequestBackedHttpRequestContext>(requestContext);
+                RequestBackedHttpRequestContext typedRequestContext = (RequestBackedHttpRequestContext)requestContext;
+                Assert.Same(request, typedRequestContext.Request);
+                Assert.Same(configuration, typedRequestContext.Configuration);
+            }
+        }
+
+        private static CancellationToken CreateCancellationToken()
+        {
+            CancellationTokenSource source = new CancellationTokenSource();
+            return source.Token;
+        }
+
+        private static HttpConfiguration CreateConfiguration()
+        {
+            return new HttpConfiguration();
+        }
+
+        private static IExceptionHandler CreateDummyExceptionHandler()
+        {
+            return new Mock<IExceptionHandler>(MockBehavior.Strict).Object;
+        }
+
+        private static IExceptionLogger CreateDummyExceptionLogger()
+        {
+            return new Mock<IExceptionLogger>(MockBehavior.Strict).Object;
+        }
+
+        private static Exception CreateException()
+        {
+            return new Exception();
+        }
+
+        private static ExceptionDispatchInfo CreateExceptionInfo()
+        {
+            try
+            {
+                throw CreateException();
+            }
+            catch (Exception exception)
+            {
+                return ExceptionDispatchInfo.Capture(exception);
+            }
+        }
+
+        private static HttpControllerDispatcher CreateProductUnderTest(HttpConfiguration configuration)
+        {
+            return new HttpControllerDispatcher(configuration);
+        }
+
+        private static HttpControllerDispatcher CreateProductUnderTest(HttpConfiguration configuration,
+            IExceptionLogger exceptionLogger, IExceptionHandler exceptionHandler)
+        {
+            return new HttpControllerDispatcher(configuration)
+            {
+                ExceptionLogger = exceptionLogger,
+                ExceptionHandler = exceptionHandler
+            };
+        }
+
+        private static HttpRequestMessage CreateRequestWithRouteData()
+        {
+            HttpRequestMessage request = new HttpRequestMessage();
+            request.SetRouteData(new Mock<IHttpRouteData>(MockBehavior.Strict).Object);
+            return request;
+        }
+
         private static HttpRequestMessage CreateRequest(HttpConfiguration config, string requestUri)
         {
             IHttpRoute route = config.Routes.MapHttpRoute("default", "api/{controller}/{id}", new { id = RouteParameter.Optional });
             var request = new HttpRequestMessage(HttpMethod.Get, requestUri);
-            request.Properties[HttpPropertyKeys.HttpRouteDataKey] = route.GetRouteData("/", request);
-            request.Properties[HttpPropertyKeys.HttpConfigurationKey] = config;
+            request.SetRouteData(route.GetRouteData("/", request));
+            request.SetConfiguration(config);
             return request;
+        }
+
+        private static HttpResponseMessage CreateResponse()
+        {
+            return new HttpResponseMessage();
+        }
+
+        private static Mock<IExceptionHandler> CreateStubExceptionHandlerMock()
+        {
+            Mock<IExceptionHandler> mock = new Mock<IExceptionHandler>(MockBehavior.Strict);
+            mock
+                .Setup(h => h.HandleAsync(It.IsAny<ExceptionHandlerContext>(), It.IsAny<CancellationToken>()))
+                .Returns(Task.FromResult(0));
+            return mock;
+        }
+
+        private static IExceptionLogger CreateStubExceptionLogger()
+        {
+            return CreateStubExceptionLoggerMock().Object;
+        }
+
+        private static Mock<IExceptionLogger> CreateStubExceptionLoggerMock()
+        {
+            Mock<IExceptionLogger> mock = new Mock<IExceptionLogger>(MockBehavior.Strict);
+            mock
+                .Setup(l => l.LogAsync(It.IsAny<ExceptionLoggerContext>(), It.IsAny<CancellationToken>()))
+                .Returns(Task.FromResult(0));
+            return mock;
+        }
+
+        private static IHttpControllerSelector CreateThrowingControllerSelector(Exception exception)
+        {
+            Mock<IHttpControllerSelector> mock = new Mock<IHttpControllerSelector>(MockBehavior.Strict);
+            mock
+                .Setup(s => s.SelectController(It.IsAny<HttpRequestMessage>()))
+                .Throws(exception);
+            return mock.Object;
+        }
+
+        private static IHttpControllerSelector CreateThrowingControllerSelector(ExceptionDispatchInfo exceptionInfo)
+        {
+            return new ThrowingControllerSelector(exceptionInfo);
         }
 
         private class PrivateController : ApiController
@@ -136,11 +671,52 @@ namespace System.Web.Http.Dispatcher
             {
                 // Empty. Skip all the logic of execcuting a controller.
                 HttpResponseMessage response = new HttpResponseMessage();
-                return TaskHelpers.FromResult(response);
+                return Task.FromResult(response);
+            }
+        }
+
+        private class ThrowingControllerSelector : IHttpControllerSelector
+        {
+            private readonly ExceptionDispatchInfo _exceptionInfo;
+
+            public ThrowingControllerSelector(ExceptionDispatchInfo exceptionInfo)
+            {
+                Contract.Assert(exceptionInfo != null);
+                _exceptionInfo = exceptionInfo;
+            }
+
+            public HttpControllerDescriptor SelectController(HttpRequestMessage request)
+            {
+                _exceptionInfo.Throw();
+                return null; // We'll never get here, but the compiler doesn't know that.
+            }
+
+            public IDictionary<string, HttpControllerDescriptor> GetControllerMapping()
+            {
+                _exceptionInfo.Throw();
+                return null; // We'll never get here, but the compiler doesn't know that.
             }
         }
     }
 
+    public class ThrowingController : ApiController
+    {
+        private readonly Exception _exception;
+
+        public ThrowingController(Exception exception)
+        {
+            _exception = exception;
+        }
+
+        public override Task<HttpResponseMessage> ExecuteAsync(HttpControllerContext controllerContext, CancellationToken cancellationToken)
+        {
+            ControllerContext = controllerContext;
+            throw _exception;
+        }
+    }
+
+    // This is used in SendAsync_IfExceptionHandlerIsDefault_Returns500WithHttpErrorWhenControllerThrows
+    // Don't touch!
     public class HttpControllerDispatcherThrowingController : ApiController
     {
         public void Get()

@@ -5,14 +5,18 @@ using System.ComponentModel;
 using System.Globalization;
 using System.Linq;
 using System.Reflection;
+using System.Security.Claims;
+using System.Security.Principal;
 using System.Threading;
+using System.Web.Mvc.Filters;
+using System.Web.Routing;
+using System.Web.Routing.Test;
 using Microsoft.TestCommon;
 using Microsoft.Web.UnitTestUtil;
 using Moq;
 
 namespace System.Web.Mvc.Test
 {
-    [CLSCompliant(false)]
     public class ControllerActionInvokerTest
     {
         [Fact]
@@ -364,10 +368,11 @@ namespace System.Web.Mvc.Test
             // Arrange
             IActionFilter actionFilter = new Mock<IActionFilter>().Object;
             IResultFilter resultFilter = new Mock<IResultFilter>().Object;
-            IAuthorizationFilter authFilter = new Mock<IAuthorizationFilter>().Object;
+            IAuthorizationFilter authorizationFilter = new Mock<IAuthorizationFilter>().Object;
+            IAuthenticationFilter authenticationFilter = new Mock<IAuthenticationFilter>().Object;
             IExceptionFilter exFilter = new Mock<IExceptionFilter>().Object;
             object noneOfTheAbove = new object();
-            ControllerActionInvokerHelper invoker = new ControllerActionInvokerHelper(actionFilter, authFilter, exFilter, resultFilter, noneOfTheAbove);
+            ControllerActionInvokerHelper invoker = new ControllerActionInvokerHelper(actionFilter, authorizationFilter, authenticationFilter, exFilter, resultFilter, noneOfTheAbove);
             ControllerContext context = new ControllerContext();
             ActionDescriptor descriptor = new Mock<ActionDescriptor>().Object;
 
@@ -376,7 +381,8 @@ namespace System.Web.Mvc.Test
 
             // Assert
             Assert.Same(actionFilter, result.ActionFilters.Single());
-            Assert.Same(authFilter, result.AuthorizationFilters.Single());
+            Assert.Same(authorizationFilter, result.AuthorizationFilters.Single());
+            Assert.Same(authenticationFilter, result.AuthenticationFilters.Single());
             Assert.Same(exFilter, result.ExceptionFilters.Single());
             Assert.Same(resultFilter, result.ResultFilters.Single());
         }
@@ -755,16 +761,21 @@ namespace System.Web.Mvc.Test
             {
                 Result = actionResult
             };
-            AuthorizationContext authContext = new AuthorizationContext();
+            ActionResult challengeResult = new EmptyResult();
+            AuthenticationContext authenticationContext = new AuthenticationContext();
+            AuthorizationContext authorizationContext = new AuthorizationContext();
+            AuthenticationChallengeContext authenticationChallengeContext = new AuthenticationChallengeContext() { Result = challengeResult };
 
             Mock<ControllerActionInvokerHelper> mockHelper = new Mock<ControllerActionInvokerHelper>() { CallBase = true };
             mockHelper.Setup(h => h.PublicGetControllerDescriptor(context)).Returns(cd).Verifiable();
             mockHelper.Setup(h => h.PublicFindAction(context, cd, "SomeMethod")).Returns(ad).Verifiable();
             mockHelper.Setup(h => h.PublicGetFilters(context, ad)).Returns(filterInfo).Verifiable();
-            mockHelper.Setup(h => h.PublicInvokeAuthorizationFilters(context, filterInfo.AuthorizationFilters, ad)).Returns(authContext).Verifiable();
+            mockHelper.Setup(h => h.PublicInvokeAuthenticationFilters(context, filterInfo.AuthenticationFilters, ad)).Returns(authenticationContext).Verifiable();
+            mockHelper.Setup(h => h.PublicInvokeAuthorizationFilters(context, filterInfo.AuthorizationFilters, ad)).Returns(authorizationContext).Verifiable();
             mockHelper.Setup(h => h.PublicGetParameterValues(context, ad)).Returns(parameters).Verifiable();
             mockHelper.Setup(h => h.PublicInvokeActionMethodWithFilters(context, filterInfo.ActionFilters, ad, parameters)).Returns(postContext).Verifiable();
-            mockHelper.Setup(h => h.PublicInvokeActionResultWithFilters(context, filterInfo.ResultFilters, actionResult)).Returns((ResultExecutedContext)null).Verifiable();
+            mockHelper.Setup(h => h.PublicInvokeAuthenticationFiltersChallenge(context, filterInfo.AuthenticationFilters, ad, actionResult)).Returns(authenticationChallengeContext).Verifiable();
+            mockHelper.Setup(h => h.PublicInvokeActionResultWithFilters(context, filterInfo.ResultFilters, challengeResult)).Returns((ResultExecutedContext)null).Verifiable();
             ControllerActionInvokerHelper helper = mockHelper.Object;
 
             // Act
@@ -785,14 +796,16 @@ namespace System.Web.Mvc.Test
             ControllerDescriptor cd = new Mock<ControllerDescriptor>().Object;
             ActionDescriptor ad = new Mock<ActionDescriptor>().Object;
             FilterInfo filterInfo = new FilterInfo();
-            AuthorizationContext authContext = new AuthorizationContext();
+            AuthenticationContext authenticationContext = new AuthenticationContext();
+            AuthorizationContext authorizationContext = new AuthorizationContext();
 
             Mock<ControllerActionInvokerHelper> mockHelper = new Mock<ControllerActionInvokerHelper>();
             mockHelper.CallBase = true;
             mockHelper.Setup(h => h.PublicGetControllerDescriptor(context)).Returns(cd).Verifiable();
             mockHelper.Setup(h => h.PublicFindAction(context, cd, "SomeMethod")).Returns(ad).Verifiable();
             mockHelper.Setup(h => h.PublicGetFilters(context, ad)).Returns(filterInfo).Verifiable();
-            mockHelper.Setup(h => h.PublicInvokeAuthorizationFilters(context, filterInfo.AuthorizationFilters, ad)).Returns(authContext).Verifiable();
+            mockHelper.Setup(h => h.PublicInvokeAuthenticationFilters(context, filterInfo.AuthenticationFilters, ad)).Returns(authenticationContext).Verifiable();
+            mockHelper.Setup(h => h.PublicInvokeAuthorizationFilters(context, filterInfo.AuthorizationFilters, ad)).Returns(authorizationContext).Verifiable();
             ControllerActionInvokerHelper helper = mockHelper.Object;
 
             // Act
@@ -815,14 +828,16 @@ namespace System.Web.Mvc.Test
             ControllerDescriptor cd = new Mock<ControllerDescriptor>().Object;
             ActionDescriptor ad = new Mock<ActionDescriptor>().Object;
             FilterInfo filterInfo = new FilterInfo();
-            AuthorizationContext authContext = new AuthorizationContext();
+            AuthenticationContext authenticationContext = new AuthenticationContext();
+            AuthorizationContext authorizationContext = new AuthorizationContext();
 
             Mock<ControllerActionInvokerHelper> mockHelper = new Mock<ControllerActionInvokerHelper>();
             mockHelper.CallBase = true;
             mockHelper.Setup(h => h.PublicGetControllerDescriptor(context)).Returns(cd).Verifiable();
             mockHelper.Setup(h => h.PublicFindAction(context, cd, "SomeMethod")).Returns(ad).Verifiable();
             mockHelper.Setup(h => h.PublicGetFilters(context, ad)).Returns(filterInfo).Verifiable();
-            mockHelper.Setup(h => h.PublicInvokeAuthorizationFilters(context, filterInfo.AuthorizationFilters, ad)).Returns(authContext).Verifiable();
+            mockHelper.Setup(h => h.PublicInvokeAuthenticationFilters(context, filterInfo.AuthenticationFilters, ad)).Returns(authenticationContext).Verifiable();
+            mockHelper.Setup(h => h.PublicInvokeAuthorizationFilters(context, filterInfo.AuthorizationFilters, ad)).Returns(authorizationContext).Verifiable();
             ControllerActionInvokerHelper helper = mockHelper.Object;
 
             // Act
@@ -1043,6 +1058,7 @@ namespace System.Web.Mvc.Test
             ActionDescriptor ad = new Mock<ActionDescriptor>().Object;
             FilterInfo filterInfo = new FilterInfo();
 
+            AuthenticationContext authenticationContext = new AuthenticationContext();
             Exception exception = new Exception();
             ActionResult actionResult = new EmptyResult();
             ExceptionContext exContext = new ExceptionContext(context, exception)
@@ -1055,7 +1071,7 @@ namespace System.Web.Mvc.Test
             mockHelper.Setup(h => h.PublicGetControllerDescriptor(context)).Returns(cd).Verifiable();
             mockHelper.Setup(h => h.PublicFindAction(context, cd, "SomeMethod")).Returns(ad).Verifiable();
             mockHelper.Setup(h => h.PublicGetFilters(context, ad)).Returns(filterInfo).Verifiable();
-            mockHelper.Setup(h => h.PublicInvokeAuthorizationFilters(context, filterInfo.AuthorizationFilters, ad)).Throws(exception).Verifiable();
+            mockHelper.Setup(h => h.PublicInvokeAuthenticationFilters(context, filterInfo.AuthenticationFilters, ad)).Throws(exception).Verifiable();
             mockHelper.Setup(h => h.PublicInvokeExceptionFilters(context, filterInfo.ExceptionFilters, exception)).Returns(exContext).Verifiable();
             mockHelper.Setup(h => h.PublicInvokeActionResult(context, actionResult)).Verifiable();
             ControllerActionInvokerHelper helper = mockHelper.Object;
@@ -1077,6 +1093,7 @@ namespace System.Web.Mvc.Test
             ActionDescriptor ad = new Mock<ActionDescriptor>().Object;
             FilterInfo filterInfo = new FilterInfo();
 
+            AuthenticationContext authenticationContext = new AuthenticationContext();
             Exception exception = new Exception();
             ExceptionContext exContext = new ExceptionContext(context, exception);
 
@@ -1084,6 +1101,7 @@ namespace System.Web.Mvc.Test
             mockHelper.Setup(h => h.PublicGetControllerDescriptor(context)).Returns(cd).Verifiable();
             mockHelper.Setup(h => h.PublicFindAction(context, cd, "SomeMethod")).Returns(ad).Verifiable();
             mockHelper.Setup(h => h.PublicGetFilters(context, ad)).Returns(filterInfo).Verifiable();
+            mockHelper.Setup(h => h.PublicInvokeAuthenticationFilters(context, filterInfo.AuthenticationFilters, ad)).Returns(authenticationContext).Verifiable();
             mockHelper.Setup(h => h.PublicInvokeAuthorizationFilters(context, filterInfo.AuthorizationFilters, ad)).Throws(exception).Verifiable();
             mockHelper.Setup(h => h.PublicInvokeExceptionFilters(context, filterInfo.ExceptionFilters, exception)).Returns(exContext).Verifiable();
             mockHelper.Setup(h => h.PublicInvokeActionResult(context, It.IsAny<ActionResult>())).Callback(delegate { Assert.True(false, "InvokeActionResult() shouldn't be called if the exception was unhandled by filters."); });
@@ -1099,6 +1117,37 @@ namespace System.Web.Mvc.Test
         }
 
         [Fact]
+        public void InvokeActionInvokesResultIfAuthenticationFilterReturnsResult()
+        {
+            // Arrange
+            ControllerBase controller = new Mock<ControllerBase>().Object;
+
+            ControllerContext context = GetControllerContext(controller);
+            ControllerDescriptor cd = new Mock<ControllerDescriptor>().Object;
+            ActionDescriptor ad = new Mock<ActionDescriptor>().Object;
+            FilterInfo filterInfo = new FilterInfo();
+
+            ActionResult actionResult = new EmptyResult();
+            AuthenticationContext authenticationContext = new AuthenticationContext() { Result = actionResult };
+            ActionResult challengeActionResult = new EmptyResult();
+            AuthenticationChallengeContext authenticationChallengeContext = new AuthenticationChallengeContext() { Result = challengeActionResult };
+
+            Mock<ControllerActionInvokerHelper> mockHelper = new Mock<ControllerActionInvokerHelper>() { CallBase = true };
+            mockHelper.Setup(h => h.PublicGetControllerDescriptor(context)).Returns(cd).Verifiable();
+            mockHelper.Setup(h => h.PublicFindAction(context, cd, "SomeMethod")).Returns(ad).Verifiable();
+            mockHelper.Setup(h => h.PublicGetFilters(context, ad)).Returns(filterInfo).Verifiable();
+            mockHelper.Setup(h => h.PublicInvokeAuthenticationFilters(context, filterInfo.AuthenticationFilters, ad)).Returns(authenticationContext).Verifiable();
+            mockHelper.Setup(h => h.PublicInvokeAuthenticationFiltersChallenge(context, filterInfo.AuthenticationFilters, ad, actionResult)).Returns(authenticationChallengeContext).Verifiable();
+            mockHelper.Setup(h => h.PublicInvokeActionResult(context, challengeActionResult)).Verifiable();
+            ControllerActionInvokerHelper helper = mockHelper.Object;
+
+            // Act
+            bool retVal = helper.InvokeAction(context, "SomeMethod");
+            Assert.True(retVal);
+            mockHelper.Verify();
+        }
+
+        [Fact]
         public void InvokeActionInvokesResultIfAuthorizationFilterReturnsResult()
         {
             // Arrange
@@ -1110,18 +1159,19 @@ namespace System.Web.Mvc.Test
             FilterInfo filterInfo = new FilterInfo();
 
             ActionResult actionResult = new EmptyResult();
-            ActionExecutedContext postContext = new ActionExecutedContext(context, ad, false /* canceled */, null /* exception */)
-            {
-                Result = actionResult
-            };
-            AuthorizationContext authContext = new AuthorizationContext() { Result = actionResult };
+            AuthenticationContext authenticationContext = new AuthenticationContext();
+            AuthorizationContext authorizationContext = new AuthorizationContext() { Result = actionResult };
+            ActionResult challengeResult = new EmptyResult();
+            AuthenticationChallengeContext authenticationChallengeContext = new AuthenticationChallengeContext() { Result = challengeResult };
 
             Mock<ControllerActionInvokerHelper> mockHelper = new Mock<ControllerActionInvokerHelper>() { CallBase = true };
             mockHelper.Setup(h => h.PublicGetControllerDescriptor(context)).Returns(cd).Verifiable();
             mockHelper.Setup(h => h.PublicFindAction(context, cd, "SomeMethod")).Returns(ad).Verifiable();
             mockHelper.Setup(h => h.PublicGetFilters(context, ad)).Returns(filterInfo).Verifiable();
-            mockHelper.Setup(h => h.PublicInvokeAuthorizationFilters(context, filterInfo.AuthorizationFilters, ad)).Returns(authContext).Verifiable();
-            mockHelper.Setup(h => h.PublicInvokeActionResult(context, actionResult)).Verifiable();
+            mockHelper.Setup(h => h.PublicInvokeAuthenticationFilters(context, filterInfo.AuthenticationFilters, ad)).Returns(authenticationContext).Verifiable();
+            mockHelper.Setup(h => h.PublicInvokeAuthorizationFilters(context, filterInfo.AuthorizationFilters, ad)).Returns(authorizationContext).Verifiable();
+            mockHelper.Setup(h => h.PublicInvokeAuthenticationFiltersChallenge(context, filterInfo.AuthenticationFilters, ad, actionResult)).Returns(authenticationChallengeContext).Verifiable();
+            mockHelper.Setup(h => h.PublicInvokeActionResult(context, challengeResult)).Verifiable();
             ControllerActionInvokerHelper helper = mockHelper.Object;
 
             // Act
@@ -1251,12 +1301,14 @@ namespace System.Web.Mvc.Test
             {
                 Result = actionResult
             };
-            AuthorizationContext authContext = new AuthorizationContext() { Result = actionResult };
+            AuthenticationContext authenticationContext = new AuthenticationContext();
+            AuthorizationContext authorizationContext = new AuthorizationContext() { Result = actionResult };
 
             Mock<ControllerActionInvokerHelper> mockHelper = new Mock<ControllerActionInvokerHelper>() { CallBase = true };
             mockHelper.Setup(h => h.PublicGetControllerDescriptor(context)).Returns(cd).Verifiable();
             mockHelper.Setup(h => h.PublicFindAction(context, cd, "SomeMethod")).Returns(ad).Verifiable();
             mockHelper.Setup(h => h.PublicGetFilters(context, ad)).Returns(filterInfo).Verifiable();
+            mockHelper.Setup(h => h.PublicInvokeAuthenticationFilters(context, filterInfo.AuthenticationFilters, ad)).Returns(authenticationContext).Verifiable();
             mockHelper
                 .Setup(h => h.PublicInvokeAuthorizationFilters(context, filterInfo.AuthorizationFilters, ad))
                 .Returns(
@@ -1283,37 +1335,6 @@ namespace System.Web.Mvc.Test
             // Assert
             Assert.True(wasAborted);
             mockHelper.Verify();
-        }
-
-        [Fact]
-        public void InvokeActionResultWithFiltersPassesSameContextObjectToInnerFilters()
-        {
-            // Arrange
-            ControllerBase controller = new Mock<ControllerBase>().Object;
-            ControllerContext context = GetControllerContext(controller);
-
-            ResultExecutingContext storedContext = null;
-            ActionResult result = new EmptyResult();
-            List<IResultFilter> filters = new List<IResultFilter>()
-            {
-                new ActionFilterImpl()
-                {
-                    OnResultExecutingImpl = delegate(ResultExecutingContext ctx) { storedContext = ctx; },
-                    OnResultExecutedImpl = delegate { }
-                },
-                new ActionFilterImpl()
-                {
-                    OnResultExecutingImpl = delegate(ResultExecutingContext ctx) { Assert.Same(storedContext, ctx); },
-                    OnResultExecutedImpl = delegate { }
-                },
-            };
-            ControllerActionInvokerHelper helper = new ControllerActionInvokerHelper();
-
-            // Act
-            ResultExecutedContext postContext = helper.PublicInvokeActionResultWithFilters(context, filters, result);
-
-            // Assert
-            Assert.Same(result, postContext.Result);
         }
 
         [Fact]
@@ -1381,7 +1402,9 @@ namespace System.Web.Mvc.Test
             ActionDescriptor ad = new Mock<ActionDescriptor>().Object;
             IDictionary<string, object> parameters = new Dictionary<string, object>();
             FilterInfo filterInfo = new FilterInfo();
-            AuthorizationContext authContext = new AuthorizationContext();
+            AuthenticationContext authenticationContext = new AuthenticationContext();
+            AuthorizationContext authorizationContext = new AuthorizationContext();
+            AuthenticationChallengeContext authenticationChallengeContext = new AuthenticationChallengeContext();
 
             Exception exception = new Exception();
             ActionResult actionResult = new EmptyResult();
@@ -1399,10 +1422,12 @@ namespace System.Web.Mvc.Test
             mockHelper.Setup(h => h.PublicGetControllerDescriptor(context)).Returns(cd).Verifiable();
             mockHelper.Setup(h => h.PublicFindAction(context, cd, "SomeMethod")).Returns(ad).Verifiable();
             mockHelper.Setup(h => h.PublicGetFilters(context, ad)).Returns(filterInfo).Verifiable();
-            mockHelper.Setup(h => h.PublicInvokeAuthorizationFilters(context, filterInfo.AuthorizationFilters, ad)).Returns(authContext).Verifiable();
+            mockHelper.Setup(h => h.PublicInvokeAuthenticationFilters(context, filterInfo.AuthenticationFilters, ad)).Returns(authenticationContext).Verifiable();
+            mockHelper.Setup(h => h.PublicInvokeAuthorizationFilters(context, filterInfo.AuthorizationFilters, ad)).Returns(authorizationContext).Verifiable();
             mockHelper.Setup(h => h.PublicGetParameterValues(context, ad)).Returns(parameters).Verifiable();
             mockHelper.Setup(h => h.PublicInvokeActionMethodWithFilters(context, filterInfo.ActionFilters, ad, parameters)).Returns(postContext).Verifiable();
             mockHelper.Setup(h => h.PublicInvokeActionResultWithFilters(context, filterInfo.ResultFilters, actionResult)).Throws(exception).Verifiable();
+            mockHelper.Setup(h => h.PublicInvokeAuthenticationFiltersChallenge(context, filterInfo.AuthenticationFilters, ad, actionResult)).Returns(authenticationChallengeContext).Verifiable();
             mockHelper.Setup(h => h.PublicInvokeExceptionFilters(context, filterInfo.ExceptionFilters, exception)).Returns(exContext).Verifiable();
             mockHelper.Setup(h => h.PublicInvokeActionResult(context, actionResult)).Verifiable();
             ControllerActionInvokerHelper helper = mockHelper.Object;
@@ -1463,6 +1488,209 @@ namespace System.Web.Mvc.Test
         }
 
         [Fact]
+        public void InvokeAuthenticationFilters()
+        {
+            // Arrange
+            ControllerBase controller = new Mock<ControllerBase>().Object;
+            ActionDescriptor ad = new Mock<ActionDescriptor>().Object;
+            ControllerContext controllerContext = GetControllerContext(controller);
+            ControllerActionInvokerHelper helper = new ControllerActionInvokerHelper();
+
+            List<AuthenticationFilterHelper> callQueue = new List<AuthenticationFilterHelper>();
+            AuthenticationFilterHelper filter1 = new AuthenticationFilterHelper(callQueue);
+            AuthenticationFilterHelper filter2 = new AuthenticationFilterHelper(callQueue);
+            IAuthenticationFilter[] filters = new IAuthenticationFilter[] { filter1, filter2 };
+            AuthenticationContext postContext;
+
+            using (new ThreadCurrentPrincipalContext())
+            {
+                // Act
+                postContext = helper.PublicInvokeAuthenticationFilters(controllerContext, filters, ad);
+            }
+
+            // Assert
+            Assert.Same(ad, postContext.ActionDescriptor);
+            Assert.Same(controller, postContext.Controller);
+            Assert.Equal(2, callQueue.Count);
+            Assert.Same(filter1, callQueue[0]);
+            Assert.Same(filter2, callQueue[1]);
+        }
+
+        [Fact]
+        public void InvokeAuthenticationFiltersProvidesHttpContextUserAsPrincipalInFilterContext()
+        {
+            // Arrange
+            ControllerBase controller = new Mock<ControllerBase>().Object;
+            ActionDescriptor ad = new Mock<ActionDescriptor>().Object;
+            ControllerContext controllerContext = GetControllerContext(controller);
+            IPrincipal principal = new ClaimsPrincipal();
+            controllerContext.HttpContext.User = principal;
+            ControllerActionInvokerHelper helper = new ControllerActionInvokerHelper();
+
+            List<AuthenticationFilterHelper> callQueue = new List<AuthenticationFilterHelper>();
+            AuthenticationFilterHelper filter = new AuthenticationFilterHelper(callQueue);
+            IAuthenticationFilter[] filters = new IAuthenticationFilter[] { filter };
+            AuthenticationContext postContext;
+
+            using (new ThreadCurrentPrincipalContext())
+            {
+                // Act
+                postContext = helper.PublicInvokeAuthenticationFilters(controllerContext, filters, ad);
+            }
+
+            // Assert
+            Assert.Same(ad, postContext.ActionDescriptor);
+            Assert.Same(controller, postContext.Controller);
+            Assert.Equal(1, callQueue.Count);
+            Assert.Same(filter, callQueue[0]);
+            Assert.Same(principal, postContext.Principal);
+        }
+
+        [Fact]
+        public void InvokeAuthenticationFiltersStopsExecutingIfResultProvided()
+        {
+            // Arrange
+            ControllerBase controller = new Mock<ControllerBase>().Object;
+            ActionDescriptor ad = new Mock<ActionDescriptor>().Object;
+            ControllerContext controllerContext = GetControllerContext(controller);
+            ControllerActionInvokerHelper helper = new ControllerActionInvokerHelper();
+            ActionResult result = new EmptyResult();
+
+            List<AuthenticationFilterHelper> callQueue = new List<AuthenticationFilterHelper>();
+            AuthenticationFilterHelper filter1 = new AuthenticationFilterHelper(callQueue) { ShortCircuitResult = result };
+            AuthenticationFilterHelper filter2 = new AuthenticationFilterHelper(callQueue);
+            IAuthenticationFilter[] filters = new IAuthenticationFilter[] { filter1, filter2 };
+            AuthenticationContext postContext;
+
+            using (new ThreadCurrentPrincipalContext())
+            {
+                // Act
+                postContext = helper.PublicInvokeAuthenticationFilters(controllerContext, filters, ad);
+            }
+
+            // Assert
+            Assert.Same(ad, postContext.ActionDescriptor);
+            Assert.Same(controller, postContext.Controller);
+            Assert.Same(result, postContext.Result);
+            Assert.Single(callQueue);
+            Assert.Same(filter1, callQueue[0]);
+        }
+
+        [Fact]
+        public void InvokeAuthenticationFiltersSetsHttpContextUserWhenPrincipalIsProvided()
+        {
+            // Arrange
+            ControllerBase controller = new Mock<ControllerBase>().Object;
+            ActionDescriptor ad = new Mock<ActionDescriptor>().Object;
+            ControllerContext controllerContext = GetControllerContext(controller);
+            ControllerActionInvokerHelper helper = new ControllerActionInvokerHelper();
+            IPrincipal principal = new ClaimsPrincipal();
+
+            List<AuthenticationFilterHelper> callQueue = new List<AuthenticationFilterHelper>();
+            AuthenticationFilterHelper filter = new AuthenticationFilterHelper(callQueue) { Principal = principal };
+            IAuthenticationFilter[] filters = new IAuthenticationFilter[] { filter };
+            AuthenticationContext postContext;
+
+            using (new ThreadCurrentPrincipalContext())
+            {
+                // Act
+                postContext = helper.PublicInvokeAuthenticationFilters(controllerContext, filters, ad);
+            }
+
+            // Assert
+            Assert.Same(ad, postContext.ActionDescriptor);
+            Assert.Same(controller, postContext.Controller);
+            Assert.Same(principal, postContext.HttpContext.User);
+            Assert.Single(callQueue);
+            Assert.Same(filter, callQueue[0]);
+        }
+
+        [Fact]
+        public void InvokeAuthenticationFiltersSetsThreadCurrentPrincipalWhenPrincipalIsProvided()
+        {
+            // Arrange
+            ControllerBase controller = new Mock<ControllerBase>().Object;
+            ActionDescriptor ad = new Mock<ActionDescriptor>().Object;
+            ControllerContext controllerContext = GetControllerContext(controller);
+            ControllerActionInvokerHelper helper = new ControllerActionInvokerHelper();
+            IPrincipal principal = new ClaimsPrincipal();
+
+            List<AuthenticationFilterHelper> callQueue = new List<AuthenticationFilterHelper>();
+            AuthenticationFilterHelper filter = new AuthenticationFilterHelper(callQueue) { Principal = principal };
+            IAuthenticationFilter[] filters = new IAuthenticationFilter[] { filter };
+
+            using (new ThreadCurrentPrincipalContext())
+            {
+                // Act
+                AuthenticationContext postContext = helper.PublicInvokeAuthenticationFilters(controllerContext, filters, ad);
+
+                // Assert
+                Assert.Same(ad, postContext.ActionDescriptor);
+                Assert.Same(controller, postContext.Controller);
+                Assert.Same(principal, Thread.CurrentPrincipal);
+                Assert.Single(callQueue);
+                Assert.Same(filter, callQueue[0]);
+            }
+        }
+
+        [Fact]
+        public void InvokeAuthenticationFiltersDoesNotSetThreadCurrentPrincipalWhenPrincipalIsUnchanged()
+        {
+            // Arrange
+            ControllerBase controller = new Mock<ControllerBase>().Object;
+            ActionDescriptor ad = new Mock<ActionDescriptor>().Object;
+            ControllerContext controllerContext = GetControllerContext(controller);
+            IPrincipal principal = new ClaimsPrincipal();
+            controllerContext.HttpContext.User = principal;
+            Assert.NotSame(controllerContext.HttpContext.User, Thread.CurrentPrincipal); // Guard
+            ControllerActionInvokerHelper helper = new ControllerActionInvokerHelper();
+
+            List<AuthenticationFilterHelper> callQueue = new List<AuthenticationFilterHelper>();
+            AuthenticationFilterHelper filter = new AuthenticationFilterHelper(callQueue);
+            IAuthenticationFilter[] filters = new IAuthenticationFilter[] { filter };
+
+            using (new ThreadCurrentPrincipalContext())
+            {
+                // Act
+                AuthenticationContext postContext = helper.PublicInvokeAuthenticationFilters(controllerContext, filters, ad);
+
+                // Assert
+                Assert.Same(ad, postContext.ActionDescriptor);
+                Assert.Same(controller, postContext.Controller);
+                Assert.NotSame(controllerContext.HttpContext.User, Thread.CurrentPrincipal);
+                Assert.Single(callQueue);
+                Assert.Same(filter, callQueue[0]);
+            }
+        }
+
+        [Fact]
+        public void InvokeAuthenticationFiltersChallenge()
+        {
+            // Arrange
+            ControllerBase controller = new Mock<ControllerBase>().Object;
+            ActionDescriptor ad = new Mock<ActionDescriptor>().Object;
+            ControllerContext controllerContext = GetControllerContext(controller);
+            ControllerActionInvokerHelper helper = new ControllerActionInvokerHelper();
+
+            List<AuthenticationFilterHelper> callQueue = new List<AuthenticationFilterHelper>();
+            AuthenticationFilterHelper filter1 = new AuthenticationFilterHelper(callQueue);
+            AuthenticationFilterHelper filter2 = new AuthenticationFilterHelper(callQueue);
+            IAuthenticationFilter[] filters = new IAuthenticationFilter[] { filter1, filter2 };
+            ActionResult result = new EmptyResult();
+
+            // Act
+            AuthenticationChallengeContext postContext = helper.PublicInvokeAuthenticationFiltersChallenge(controllerContext, filters, ad, result);
+
+            // Assert
+            Assert.Same(ad, postContext.ActionDescriptor);
+            Assert.Same(controller, postContext.Controller);
+            Assert.Same(result, postContext.Result);
+            Assert.Equal(2, callQueue.Count);
+            Assert.Same(filter1, callQueue[0]);
+            Assert.Same(filter2, callQueue[1]);
+        }
+
+        [Fact]
         public void InvokeExceptionFilters()
         {
             // Arrange
@@ -1515,7 +1743,7 @@ namespace System.Web.Mvc.Test
         }
 
         [Fact]
-        public void InvokeResultFiltersOrdersFiltersCorrectly()
+        public void InvokeActionResultWithFiltersOrdersFiltersCorrectly()
         {
             // Arrange
             List<string> actions = new List<string>();
@@ -1549,7 +1777,7 @@ namespace System.Web.Mvc.Test
         }
 
         [Fact]
-        public void InvokeResultFiltersPassesArgumentsCorrectly()
+        public void InvokeActionResultWithFiltersPassesArgumentsCorrectly()
         {
             // Arrange
             bool wasCalled = false;
@@ -1582,12 +1810,56 @@ namespace System.Web.Mvc.Test
         }
 
         [Fact]
-        public void InvokeResultFilterWhereContinuationThrowsExceptionAndIsHandled()
+        public void InvokeActionResultWithFiltersPassesSameContextObjectToInnerFilters()
+        {
+            // Arrange
+            ControllerBase controller = new Mock<ControllerBase>().Object;
+            ControllerContext context = GetControllerContext(controller);
+
+            ResultExecutingContext storedContext = null;
+            ActionResult result = new EmptyResult();
+            List<IResultFilter> filters = new List<IResultFilter>()
+            {
+                new ActionFilterImpl()
+                {
+                    OnResultExecutingImpl = delegate(ResultExecutingContext ctx) 
+                    {
+                        Assert.NotNull(ctx);
+                        storedContext = ctx; 
+                    },
+                    OnResultExecutedImpl = delegate { }
+                },
+                new ActionFilterImpl()
+                {
+                    OnResultExecutingImpl = delegate(ResultExecutingContext ctx) 
+                    { 
+                        Assert.NotNull(ctx);
+                        Assert.Same(storedContext, ctx); 
+                    },
+                    OnResultExecutedImpl = delegate { }
+                },
+            };
+            ControllerActionInvokerHelper helper = new ControllerActionInvokerHelper();
+
+            // Act
+            ResultExecutedContext postContext = helper.PublicInvokeActionResultWithFilters(context, filters, result);
+
+            // Assert
+            Assert.Same(result, postContext.Result);
+        }
+
+        [Fact]
+        public void InvokeActionResultWithFiltersWhereContinuationThrowsExceptionAndIsHandled()
         {
             // Arrange
             List<string> actions = new List<string>();
-            ActionResult actionResult = new EmptyResult();
             Exception exception = new Exception();
+            Action continuation = delegate
+            {
+                actions.Add("Continuation");
+                throw exception;
+            };
+            ActionResult actionResult = new ContinuationResult(continuation);
             ActionFilterImpl filter = new ActionFilterImpl()
             {
                 OnResultExecutingImpl = delegate(ResultExecutingContext filterContext) { actions.Add("OnResultExecuting"); },
@@ -1600,17 +1872,14 @@ namespace System.Web.Mvc.Test
                     filterContext.ExceptionHandled = true;
                 }
             };
-            Func<ResultExecutedContext> continuation = delegate
-            {
-                actions.Add("Continuation");
-                throw exception;
-            };
 
             Mock<ResultExecutingContext> mockResultExecutingContext = new Mock<ResultExecutingContext>() { DefaultValue = DefaultValue.Mock };
             mockResultExecutingContext.Setup(c => c.Result).Returns(actionResult);
+            List<IResultFilter> filters = new List<IResultFilter>() { filter, };
+            ControllerActionInvokerHelper helper = new ControllerActionInvokerHelper();
 
             // Act
-            ResultExecutedContext result = ControllerActionInvoker.InvokeActionResultFilter(filter, mockResultExecutingContext.Object, continuation);
+            ResultExecutedContext result = helper.PublicInvokeActionResultWithFilters(mockResultExecutingContext.Object, filters, actionResult);
 
             // Assert
             Assert.Equal(3, actions.Count);
@@ -1623,24 +1892,29 @@ namespace System.Web.Mvc.Test
         }
 
         [Fact]
-        public void InvokeResultFilterWhereContinuationThrowsExceptionAndIsNotHandled()
+        public void InvokeActionResultWithFiltersWhereContinuationThrowsExceptionAndIsNotHandled()
         {
             // Arrange
             List<string> actions = new List<string>();
+            Action continuation = delegate
+            {
+                actions.Add("Continuation");
+                throw new Exception("Some exception message.");
+            };
+            ActionResult actionResult = new ContinuationResult(continuation);
             ActionFilterImpl filter = new ActionFilterImpl()
             {
                 OnResultExecutingImpl = delegate(ResultExecutingContext filterContext) { actions.Add("OnResultExecuting"); },
                 OnResultExecutedImpl = delegate(ResultExecutedContext filterContext) { actions.Add("OnResultExecuted"); }
             };
-            Func<ResultExecutedContext> continuation = delegate
-            {
-                actions.Add("Continuation");
-                throw new Exception("Some exception message.");
-            };
+            Mock<ResultExecutingContext> mockResultExecutingContext = new Mock<ResultExecutingContext>() { DefaultValue = DefaultValue.Mock };
+            mockResultExecutingContext.Setup(c => c.Result).Returns(actionResult);
+            List<IResultFilter> filters = new List<IResultFilter>() { filter, };
+            ControllerActionInvokerHelper helper = new ControllerActionInvokerHelper();
 
             // Act & Assert
             Assert.Throws<Exception>(
-                delegate { ControllerActionInvoker.InvokeActionResultFilter(filter, new Mock<ResultExecutingContext>() { DefaultValue = DefaultValue.Mock }.Object, continuation); },
+                delegate { helper.PublicInvokeActionResultWithFilters(mockResultExecutingContext.Object, filters, actionResult); },
                 "Some exception message.");
             Assert.Equal(3, actions.Count);
             Assert.Equal("OnResultExecuting", actions[0]);
@@ -1649,15 +1923,19 @@ namespace System.Web.Mvc.Test
         }
 
         [Fact]
-        public void InvokeResultFilterWhereContinuationThrowsThreadAbortException()
+        public void InvokeActionResultWithFiltersWhereContinuationThrowsThreadAbortException()
         {
             // Arrange
             List<string> actions = new List<string>();
-            ActionResult actionResult = new EmptyResult();
 
+            Action continuation = delegate
+            {
+                actions.Add("Continuation");
+                Thread.CurrentThread.Abort();
+            };
+            ActionResult actionResult = new ContinuationResult(continuation);
             Mock<ResultExecutingContext> mockPreContext = new Mock<ResultExecutingContext>() { DefaultValue = DefaultValue.Mock };
             mockPreContext.Setup(c => c.Result).Returns(actionResult);
-
             ActionFilterImpl filter = new ActionFilterImpl()
             {
                 OnResultExecutingImpl = delegate(ResultExecutingContext filterContext) { actions.Add("OnResultExecuting"); },
@@ -1670,16 +1948,12 @@ namespace System.Web.Mvc.Test
                     Assert.False(filterContext.ExceptionHandled);
                 }
             };
-            Func<ResultExecutedContext> continuation = delegate
-            {
-                actions.Add("Continuation");
-                Thread.CurrentThread.Abort();
-                return null;
-            };
+            List<IResultFilter> filters = new List<IResultFilter>() { filter, };
+            ControllerActionInvokerHelper helper = new ControllerActionInvokerHelper();
 
             // Act & Assert
             Assert.Throws<ThreadAbortException>(
-                delegate { ControllerActionInvoker.InvokeActionResultFilter(filter, mockPreContext.Object, continuation); },
+                delegate { helper.PublicInvokeActionResultWithFilters(mockPreContext.Object, filters, actionResult); },
                 "Thread was being aborted.");
             Assert.Equal(3, actions.Count);
             Assert.Equal("OnResultExecuting", actions[0]);
@@ -1688,13 +1962,183 @@ namespace System.Web.Mvc.Test
         }
 
         [Fact]
-        public void InvokeResultFilterWhereOnResultExecutingCancels()
+        public void InvokeActionResultWithFiltersWhereContinuationThrowsUnhandledWithMultipleFilters()
+        {
+            // Arrange
+            List<string> actions = new List<string>();
+            string expectedExceptionMessage = "Some exception message.";
+            Action continuation = delegate
+            {
+                actions.Add("Continuation");
+                throw new Exception(expectedExceptionMessage);
+            };
+            ActionFilterImpl filter1 = new ActionFilterImpl()
+            {
+                OnResultExecutingImpl = delegate(ResultExecutingContext filterContext)
+                {
+                    actions.Add("OnResultExecuting1");
+                },
+                OnResultExecutedImpl = delegate(ResultExecutedContext filterContext)
+                {
+                    actions.Add("OnResultExecuted1");
+                    Assert.NotNull(filterContext.Exception);
+                    Assert.Equal(filterContext.Exception.Message, expectedExceptionMessage);
+                }
+            };
+            ActionFilterImpl filter2 = new ActionFilterImpl()
+            {
+                OnResultExecutingImpl = delegate(ResultExecutingContext filterContext)
+                {
+                    actions.Add("OnResultExecuting2");
+                },
+                OnResultExecutedImpl = delegate(ResultExecutedContext filterContext)
+                {
+                    actions.Add("OnResultExecuted2");
+                    Assert.NotNull(filterContext.Exception);
+                    Assert.Equal(filterContext.Exception.Message, expectedExceptionMessage);
+                }
+            };
+            ActionResult actionResult = new ContinuationResult(continuation);
+            ControllerBase controller = new Mock<ControllerBase>().Object;
+            ControllerContext context = GetControllerContext(controller);
+            ControllerActionInvokerHelper helper = new ControllerActionInvokerHelper();
+            List<IResultFilter> filters = new List<IResultFilter>() { filter1, filter2 };
+
+            // Act
+            Assert.Throws<Exception>(
+                delegate { helper.PublicInvokeActionResultWithFilters(context, filters, actionResult); },
+                expectedExceptionMessage);
+
+            // Assert
+            Assert.Equal(5, actions.Count);
+            Assert.Equal("OnResultExecuting1", actions[0]);
+            Assert.Equal("OnResultExecuting2", actions[1]);
+            Assert.Equal("Continuation", actions[2]);
+            Assert.Equal("OnResultExecuted2", actions[3]);
+            Assert.Equal("OnResultExecuted1", actions[4]);
+        }
+
+        [Fact]
+        public void InvokeActionResultWithFiltersWhereContinuationThrowsHandledByEarlierFilter()
+        {
+            // Arrange
+            List<string> actions = new List<string>();
+            Exception exception = new Exception();
+            Action continuation = delegate
+            {
+                actions.Add("Continuation");
+                throw exception;
+            };
+            ActionFilterImpl filter1 = new ActionFilterImpl()
+            {
+                OnResultExecutingImpl = delegate(ResultExecutingContext filterContext)
+                {
+                    actions.Add("OnResultExecuting1");
+                },
+                OnResultExecutedImpl = delegate(ResultExecutedContext filterContext)
+                {
+                    actions.Add("OnResultExecuted1");
+                    filterContext.ExceptionHandled = true;
+                    Assert.Same(exception, filterContext.Exception);
+                }
+            };
+            ActionFilterImpl filter2 = new ActionFilterImpl()
+            {
+                OnResultExecutingImpl = delegate(ResultExecutingContext filterContext)
+                {
+                    actions.Add("OnResultExecuting2");
+                },
+                OnResultExecutedImpl = delegate(ResultExecutedContext filterContext)
+                {
+                    actions.Add("OnResultExecuted2");
+                    Assert.Same(exception, filterContext.Exception);
+                }
+            };
+            ActionResult actionResult = new ContinuationResult(continuation);
+            ControllerBase controller = new Mock<ControllerBase>().Object;
+            ControllerContext context = GetControllerContext(controller);
+            ControllerActionInvokerHelper helper = new ControllerActionInvokerHelper();
+            List<IResultFilter> filters = new List<IResultFilter>() { filter1, filter2 };
+
+            // Act
+            ResultExecutedContext result = helper.PublicInvokeActionResultWithFilters(context, filters, actionResult);
+
+            // Assert
+            Assert.Equal(5, actions.Count);
+            Assert.Equal("OnResultExecuting1", actions[0]);
+            Assert.Equal("OnResultExecuting2", actions[1]);
+            Assert.Equal("Continuation", actions[2]);
+            Assert.Equal("OnResultExecuted2", actions[3]);
+            Assert.Equal("OnResultExecuted1", actions[4]);
+            Assert.Same(exception, result.Exception);
+            Assert.True(result.ExceptionHandled);
+            Assert.Same(actionResult, result.Result);
+        }
+
+        [Fact]
+        public void InvokeActionResultWithFiltersWhereContinuationThrowsHandledByLaterFilter()
+        {
+            // Arrange
+            List<string> actions = new List<string>();
+            Exception exception = new Exception();
+            Action continuation = delegate
+            {
+                actions.Add("Continuation");
+                throw exception;
+            };
+            ActionFilterImpl filter1 = new ActionFilterImpl()
+            {
+                OnResultExecutingImpl = delegate(ResultExecutingContext filterContext)
+                {
+                    actions.Add("OnResultExecuting1");
+                },
+                OnResultExecutedImpl = delegate(ResultExecutedContext filterContext)
+                {
+                    actions.Add("OnResultExecuted1");
+                    Assert.True(filterContext.ExceptionHandled);
+                }
+            };
+            ActionFilterImpl filter2 = new ActionFilterImpl()
+            {
+                OnResultExecutingImpl = delegate(ResultExecutingContext filterContext)
+                {
+                    actions.Add("OnResultExecuting2");
+                },
+                OnResultExecutedImpl = delegate(ResultExecutedContext filterContext)
+                {
+                    actions.Add("OnResultExecuted2");
+                    Assert.Same(exception, filterContext.Exception);
+                    filterContext.ExceptionHandled = true;
+                }
+            };
+            ActionResult actionResult = new ContinuationResult(continuation);
+            ControllerBase controller = new Mock<ControllerBase>().Object;
+            ControllerContext context = GetControllerContext(controller);
+            ControllerActionInvokerHelper helper = new ControllerActionInvokerHelper();
+            List<IResultFilter> filters = new List<IResultFilter>() { filter1, filter2 };
+
+            // Act
+            ResultExecutedContext result = helper.PublicInvokeActionResultWithFilters(context, filters, actionResult);
+
+            // Assert
+            Assert.Equal(5, actions.Count);
+            Assert.Equal("OnResultExecuting1", actions[0]);
+            Assert.Equal("OnResultExecuting2", actions[1]);
+            Assert.Equal("Continuation", actions[2]);
+            Assert.Equal("OnResultExecuted2", actions[3]);
+            Assert.Equal("OnResultExecuted1", actions[4]);
+            Assert.Same(exception, result.Exception);
+            Assert.True(result.ExceptionHandled);
+            Assert.Same(actionResult, result.Result);
+        }
+
+        [Fact]
+        public void InvokeActionResultWithFiltersWhereCancelled()
         {
             // Arrange
             bool wasCalled = false;
             MethodInfo mi = typeof(object).GetMethod("ToString");
             object[] paramValues = new object[0];
-            ActionResult actionResult = new EmptyResult();
             ActionFilterImpl filter = new ActionFilterImpl()
             {
                 OnResultExecutingImpl = delegate(ResultExecutingContext filterContext)
@@ -1704,17 +2148,19 @@ namespace System.Web.Mvc.Test
                     filterContext.Cancel = true;
                 },
             };
-            Func<ResultExecutedContext> continuation = delegate
+            Action continuation = delegate
             {
                 Assert.True(false, "The continuation should not be called.");
-                return null;
             };
+            ActionResult actionResult = new ContinuationResult(continuation);
 
             Mock<ResultExecutingContext> mockResultExecutingContext = new Mock<ResultExecutingContext>() { DefaultValue = DefaultValue.Mock };
             mockResultExecutingContext.Setup(c => c.Result).Returns(actionResult);
+            List<IResultFilter> filters = new List<IResultFilter>() { filter, };
+            ControllerActionInvokerHelper helper = new ControllerActionInvokerHelper();
 
             // Act
-            ResultExecutedContext result = ControllerActionInvoker.InvokeActionResultFilter(filter, mockResultExecutingContext.Object, continuation);
+            ResultExecutedContext result = helper.PublicInvokeActionResultWithFilters(mockResultExecutingContext.Object, filters, actionResult);
 
             // Assert
             Assert.True(wasCalled);
@@ -1724,15 +2170,116 @@ namespace System.Web.Mvc.Test
         }
 
         [Fact]
-        public void InvokeResultFilterWithNormalControlFlow()
+        public void InvokeActionResultWithFiltersWhereCancelledByEarlierFilter()
         {
             // Arrange
             List<string> actions = new List<string>();
-            ActionResult actionResult = new EmptyResult();
+            ActionFilterImpl filter1 = new ActionFilterImpl()
+            {
+                OnResultExecutingImpl = delegate(ResultExecutingContext filterContext)
+                {
+                    actions.Add("OnResultExecuting1");
+                    filterContext.Cancel = true;
+                },
+                OnResultExecutedImpl = delegate(ResultExecutedContext filterContext)
+                {
+                    actions.Add("OnResultExecuted1");
+                }
+            };
+            ActionFilterImpl filter2 = new ActionFilterImpl()
+            {
+                OnResultExecutingImpl = delegate(ResultExecutingContext filterContext)
+                {
+                    actions.Add("OnResultExecuting2");
+                },
+                OnResultExecutedImpl = delegate(ResultExecutedContext filterContext)
+                {
+                    actions.Add("OnResultExecuted2");
+                }
+            };
+            Action continuation = delegate
+            {
+                actions.Add("Continuation");
+            };
+            ActionResult actionResult = new ContinuationResult(continuation);
+            ControllerBase controller = new Mock<ControllerBase>().Object;
+            ControllerContext context = GetControllerContext(controller);
+            ControllerActionInvokerHelper helper = new ControllerActionInvokerHelper();
+            List<IResultFilter> filters = new List<IResultFilter>() { filter1, filter2 };
 
-            Mock<ResultExecutedContext> mockPostContext = new Mock<ResultExecutedContext>();
-            mockPostContext.Setup(c => c.Result).Returns(actionResult);
+            // Act
+            ResultExecutedContext result = helper.PublicInvokeActionResultWithFilters(context, filters, actionResult);
 
+            // Assert
+            Assert.Equal(1, actions.Count);
+            Assert.Equal("OnResultExecuting1", actions[0]);
+            Assert.Null(result.Exception);
+            Assert.True(result.Canceled);
+            Assert.Same(actionResult, result.Result);
+        }
+
+        [Fact]
+        public void InvokeActionResultWithFiltersWhereCancelledByLaterFilter()
+        {
+            // Arrange
+            List<string> actions = new List<string>();
+            ActionFilterImpl filter1 = new ActionFilterImpl()
+            {
+                OnResultExecutingImpl = delegate(ResultExecutingContext filterContext)
+                {
+                    actions.Add("OnResultExecuting1");
+                },
+                OnResultExecutedImpl = delegate(ResultExecutedContext filterContext)
+                {
+                    actions.Add("OnResultExecuted1");
+                    Assert.True(filterContext.Canceled);
+                }
+            };
+            ActionFilterImpl filter2 = new ActionFilterImpl()
+            {
+                OnResultExecutingImpl = delegate(ResultExecutingContext filterContext)
+                {
+                    actions.Add("OnResultExecuting2");
+                    filterContext.Cancel = true;
+                },
+                OnResultExecutedImpl = delegate(ResultExecutedContext filterContext)
+                {
+                    actions.Add("OnResultExecuted2");
+                }
+            };
+            Action continuation = delegate
+            {
+                actions.Add("Continuation");
+            };
+            ActionResult actionResult = new ContinuationResult(continuation);
+            ControllerBase controller = new Mock<ControllerBase>().Object;
+            ControllerContext context = GetControllerContext(controller);
+            ControllerActionInvokerHelper helper = new ControllerActionInvokerHelper();
+            List<IResultFilter> filters = new List<IResultFilter>() { filter1, filter2 };
+
+            // Act
+            ResultExecutedContext result = helper.PublicInvokeActionResultWithFilters(context, filters, actionResult);
+
+            // Assert
+            Assert.Equal(3, actions.Count);
+            Assert.Equal("OnResultExecuting1", actions[0]);
+            Assert.Equal("OnResultExecuting2", actions[1]);
+            Assert.Equal("OnResultExecuted1", actions[2]);
+            Assert.Null(result.Exception);
+            Assert.True(result.Canceled);
+            Assert.Same(actionResult, result.Result);
+        }
+
+        [Fact]
+        public void InvokeActionResultWithFiltersWithNormalControlFlow()
+        {
+            // Arrange
+            List<string> actions = new List<string>();
+            Action continuation = delegate
+            {
+                actions.Add("Continuation");
+            };
+            ActionResult actionResult = new ContinuationResult(continuation);
             ActionFilterImpl filter = new ActionFilterImpl()
             {
                 OnResultExecutingImpl = delegate(ResultExecutingContext filterContext)
@@ -1743,28 +2290,27 @@ namespace System.Web.Mvc.Test
                 },
                 OnResultExecutedImpl = delegate(ResultExecutedContext filterContext)
                 {
-                    Assert.Equal(mockPostContext.Object, filterContext);
+                    Assert.Same(actionResult, filterContext.Result);
+                    Assert.False(filterContext.Canceled);
+                    Assert.Null(filterContext.Exception);
+                    Assert.False(filterContext.ExceptionHandled);
                     actions.Add("OnResultExecuted");
                 }
             };
-            Func<ResultExecutedContext> continuation = delegate
-            {
-                actions.Add("Continuation");
-                return mockPostContext.Object;
-            };
-
             Mock<ResultExecutingContext> mockResultExecutingContext = new Mock<ResultExecutingContext>();
             mockResultExecutingContext.Setup(c => c.Result).Returns(actionResult);
+            List<IResultFilter> filters = new List<IResultFilter>() { filter, };
+            ControllerActionInvokerHelper helper = new ControllerActionInvokerHelper();
 
             // Act
-            ResultExecutedContext result = ControllerActionInvoker.InvokeActionResultFilter(filter, mockResultExecutingContext.Object, continuation);
+            ResultExecutedContext result = helper.PublicInvokeActionResultWithFilters(mockResultExecutingContext.Object, filters, actionResult);
 
             // Assert
             Assert.Equal(3, actions.Count);
             Assert.Equal("OnResultExecuting", actions[0]);
             Assert.Equal("Continuation", actions[1]);
             Assert.Equal("OnResultExecuted", actions[2]);
-            Assert.Same(result, mockPostContext.Object);
+            Assert.Same(result.Result, actionResult);
         }
 
         [Fact]
@@ -1784,6 +2330,119 @@ namespace System.Web.Mvc.Test
             // Assert (arg got passed to method + back correctly)
             CustomResult customResult = Assert.IsType<CustomResult>(actionResult);
             Assert.Equal("abc123", customResult.ReturnValue);
+        }
+
+        [Fact]
+        public void FindAction_MultipleMethodsSameActionOneWithRouteAttributeAndRouteWasMatched_ReturnsMethodWithRoutingAttribute()
+        {
+            // Arrange
+            Type controllerType = typeof(WithRoutingAttributeController);
+            ControllerDescriptor controllerDescriptor = new ReflectedControllerDescriptor(controllerType);
+
+            var context = new ControllerContext();
+            context.RouteData = new RouteData();
+            context.RouteData.Route = DirectRouteTestHelpers.BuildDirectRouteFromMethod<WithRoutingAttributeController>(c => c.Action());
+            context.RouteData.AddDirectRouteMatches();
+
+            var actionInvoker = new ControllerActionInvokerHelper();
+
+            // Act
+            ActionDescriptor actionDescriptor = actionInvoker.PublicFindAction(context, controllerDescriptor, actionName: null);
+
+            var matchedMethod = ((ReflectedActionDescriptor)actionDescriptor).MethodInfo;
+
+            // Assert
+            Assert.Equal(typeof(WithRoutingAttributeController).GetMethod("Action"), matchedMethod);
+        }
+
+        [Fact]
+        public void FindAction_ControllerLevelDirectRoute_FindsMatch()
+        {
+            // Arrange
+            Type controllerType = typeof(AttributeRoutingOnTheController);
+            ControllerDescriptor controllerDescriptor = new ReflectedControllerDescriptor(controllerType);
+
+            var context = new ControllerContext();
+            context.RouteData = new RouteData();
+            context.RouteData.Route = DirectRouteTestHelpers.BuildDirectRouteFromController<AttributeRoutingOnTheController>();
+
+            // Simulate a match that binds the action parameter
+            context.RouteData.AddDirectRouteMatches((r, rd) => { rd.Values.Add("action", "Action1"); return true; });
+
+            ControllerActionInvokerHelper invoker = new ControllerActionInvokerHelper();
+
+            // Act
+            ActionDescriptor actionDescriptor = invoker.PublicFindAction(context, controllerDescriptor, actionName: null);
+
+            var matchedMethod = ((ReflectedActionDescriptor)actionDescriptor).MethodInfo;
+
+            // Assert
+            Assert.Equal(typeof(AttributeRoutingOnTheController).GetMethod("Action1"), matchedMethod);
+        }
+
+        [Fact]
+        public void FindAction_ControllerLevelDirectRoute_NoMatch()
+        {
+            // Arrange
+            Type controllerType = typeof(AttributeRoutingOnTheController);
+            ControllerDescriptor controllerDescriptor = new ReflectedControllerDescriptor(controllerType);
+
+            var context = new ControllerContext();
+            context.RouteData = new RouteData();
+            context.RouteData.Route = DirectRouteTestHelpers.BuildDirectRouteFromController<AttributeRoutingOnTheController>();
+
+            // Simulate a match that binds the action parameter
+            context.RouteData.AddDirectRouteMatches((r, rd) => { rd.Values.Add("action", "Action3"); return true; });
+
+            ControllerActionInvokerHelper invoker = new ControllerActionInvokerHelper();
+
+            // Act
+            ActionDescriptor actionDescriptor = invoker.PublicFindAction(context, controllerDescriptor, actionName: null);
+
+            // Assert
+            Assert.Null(actionDescriptor);
+        }
+
+        [Fact]
+        public void FindAction_ControllerLevelDirectRoute_AmbiguousMatch()
+        {
+            // Arrange
+            Type controllerType = typeof(AttributeRoutingOnTheController);
+            ControllerDescriptor controllerDescriptor = new ReflectedControllerDescriptor(controllerType);
+
+            var context = new ControllerContext();
+            context.RouteData = new RouteData();
+            context.RouteData.Route = DirectRouteTestHelpers.BuildDirectRouteFromController<AttributeRoutingOnTheController>();
+
+            // Simulate a match that binds the action parameter
+            context.RouteData.AddDirectRouteMatches((r, rd) => { rd.Values.Add("action", "Action2"); return true; });
+
+            ControllerActionInvokerHelper invoker = new ControllerActionInvokerHelper();
+
+            // Act & Assert
+            Assert.Throws<AmbiguousMatchException>(() => invoker.PublicFindAction(context, controllerDescriptor, actionName: null));
+        }
+
+        [Fact]
+        public void FindActionMethod_MultipleMethodsSameActionOneWithRouteAttributeAndRouteWasMatched_ReturnsMethodWithRoutingAttribute()
+        {
+            // Arrange
+            Type controllerType = typeof(WithRoutingAttributeController);
+            ControllerDescriptor controllerDescriptor = new ReflectedControllerDescriptor(controllerType);
+
+            var context = new ControllerContext();
+            context.RouteData = new RouteData();
+            context.RouteData.Route = DirectRouteTestHelpers.BuildDirectRouteFromMethod<WithRoutingAttributeController>(c => c.Action());
+            context.RouteData.AddDirectRouteMatches();
+
+            ControllerActionInvokerHelper invoker = new ControllerActionInvokerHelper();
+
+            // Act
+            ActionDescriptor actionDescriptor = invoker.PublicFindAction(context, controllerDescriptor, actionName: null);
+            MethodInfo matchedMethod = ((ReflectedActionDescriptor)actionDescriptor).MethodInfo;
+
+            // Assert
+            Assert.Equal("Action", matchedMethod.Name);
         }
 
         private static ControllerContext GetControllerContext(ControllerBase controller)
@@ -1823,47 +2482,6 @@ namespace System.Web.Mvc.Test
             return mockControllerContext.Object;
         }
 
-        private class EmptyActionFilterAttribute : ActionFilterAttribute
-        {
-        }
-
-        private abstract class KeyedFilterAttribute : FilterAttribute
-        {
-            public string Key { get; set; }
-        }
-
-        private class KeyedAuthorizationFilterAttribute : KeyedFilterAttribute, IAuthorizationFilter
-        {
-            public void OnAuthorization(AuthorizationContext filterContext)
-            {
-                throw new NotImplementedException();
-            }
-        }
-
-        [AttributeUsage(AttributeTargets.Class | AttributeTargets.Method, Inherited = true, AllowMultiple = true)]
-        private class KeyedActionFilterAttribute : KeyedFilterAttribute, IActionFilter, IResultFilter
-        {
-            public void OnActionExecuting(ActionExecutingContext filterContext)
-            {
-                throw new NotImplementedException();
-            }
-
-            public void OnActionExecuted(ActionExecutedContext filterContext)
-            {
-                throw new NotImplementedException();
-            }
-
-            public void OnResultExecuting(ResultExecutingContext filterContext)
-            {
-                throw new NotImplementedException();
-            }
-
-            public void OnResultExecuted(ResultExecutedContext filterContext)
-            {
-                throw new NotImplementedException();
-            }
-        }
-
         private class ActionFilterImpl : IActionFilter, IResultFilter
         {
             public Action<ActionExecutingContext> OnActionExecutingImpl { get; set; }
@@ -1892,31 +2510,6 @@ namespace System.Web.Mvc.Test
             public void OnResultExecuted(ResultExecutedContext filterContext)
             {
                 OnResultExecutedImpl(filterContext);
-            }
-        }
-
-        [KeyedActionFilter(Key = "BaseClass", Order = 0)]
-        [KeyedAuthorizationFilter(Key = "BaseClass", Order = 0)]
-        private class GetMemberChainController : Controller
-        {
-            [KeyedActionFilter(Key = "BaseMethod", Order = 0)]
-            [KeyedAuthorizationFilter(Key = "BaseMethod", Order = 0)]
-            public virtual void SomeVirtual()
-            {
-            }
-        }
-
-        [KeyedActionFilter(Key = "DerivedClass", Order = 1)]
-        private class GetMemberChainDerivedController : GetMemberChainController
-        {
-        }
-
-        [KeyedActionFilter(Key = "SubderivedClass", Order = 2)]
-        private class GetMemberChainSubderivedController : GetMemberChainDerivedController
-        {
-            [KeyedActionFilter(Key = "SubderivedMethod", Order = 2)]
-            public override void SomeVirtual()
-            {
             }
         }
 
@@ -2272,6 +2865,26 @@ namespace System.Web.Mvc.Test
                 return PublicInvokeAuthorizationFilters(controllerContext, filters, actionDescriptor);
             }
 
+            public virtual AuthenticationContext PublicInvokeAuthenticationFilters(ControllerContext controllerContext, IList<IAuthenticationFilter> filters, ActionDescriptor actionDescriptor)
+            {
+                return base.InvokeAuthenticationFilters(controllerContext, filters, actionDescriptor);
+            }
+
+            protected override AuthenticationContext InvokeAuthenticationFilters(ControllerContext controllerContext, IList<IAuthenticationFilter> filters, ActionDescriptor actionDescriptor)
+            {
+                return PublicInvokeAuthenticationFilters(controllerContext, filters, actionDescriptor);
+            }
+
+            public virtual AuthenticationChallengeContext PublicInvokeAuthenticationFiltersChallenge(ControllerContext controllerContext, IList<IAuthenticationFilter> filters, ActionDescriptor actionDescriptor, ActionResult result)
+            {
+                return base.InvokeAuthenticationFiltersChallenge(controllerContext, filters, actionDescriptor, result);
+            }
+
+            protected override AuthenticationChallengeContext InvokeAuthenticationFiltersChallenge(ControllerContext controllerContext, IList<IAuthenticationFilter> filters, ActionDescriptor actionDescriptor, ActionResult result)
+            {
+                return PublicInvokeAuthenticationFiltersChallenge(controllerContext, filters, actionDescriptor, result);
+            }
+
             public virtual ExceptionContext PublicInvokeExceptionFilters(ControllerContext controllerContext, IList<IExceptionFilter> filters, Exception exception)
             {
                 return base.InvokeExceptionFilters(controllerContext, filters, exception);
@@ -2300,6 +2913,36 @@ namespace System.Web.Mvc.Test
                 {
                     filterContext.Result = ShortCircuitResult;
                 }
+            }
+        }
+
+        public class AuthenticationFilterHelper : IAuthenticationFilter
+        {
+            private IList<AuthenticationFilterHelper> _callQueue;
+            public ActionResult ShortCircuitResult;
+            public IPrincipal Principal;
+
+            public AuthenticationFilterHelper(IList<AuthenticationFilterHelper> callQueue)
+            {
+                _callQueue = callQueue;
+            }
+
+            public void OnAuthentication(AuthenticationContext filterContext)
+            {
+                _callQueue.Add(this);
+                if (ShortCircuitResult != null)
+                {
+                    filterContext.Result = ShortCircuitResult;
+                }
+                if (Principal != null)
+                {
+                    filterContext.Principal = Principal;
+                }
+            }
+
+            public void OnAuthenticationChallenge(AuthenticationChallengeContext filterContext)
+            {
+                _callQueue.Add(this);
             }
         }
 
@@ -2414,7 +3057,6 @@ namespace System.Web.Mvc.Test
             }
         }
 
-
         // helper class for making sure that we're performing culture-invariant string conversions
         public class CultureReflector : IFormattable
         {
@@ -2422,6 +3064,72 @@ namespace System.Web.Mvc.Test
             {
                 CultureInfo cInfo = (CultureInfo)formatProvider;
                 return cInfo.ThreeLetterISOLanguageName;
+            }
+        }
+
+        private sealed class ThreadCurrentPrincipalContext : IDisposable
+        {
+            private readonly IPrincipal _originalPrincipal;
+
+            private bool _disposed;
+
+            public ThreadCurrentPrincipalContext()
+            {
+                _originalPrincipal = Thread.CurrentPrincipal;
+            }
+
+            public void Dispose()
+            {
+                if (!_disposed)
+                {
+                    Thread.CurrentPrincipal = _originalPrincipal;
+                    _disposed = true;
+                }
+            }
+        }
+
+        private class WithRoutingAttributeController : Controller
+        {
+            [Route("route")]
+            [ActionName("Action")] // to make things confusing
+            public void ActionWithoutRoute()
+            {
+            }
+
+            [Route("route")]
+            public void Action()
+            {
+            }
+        }
+
+        [Route("controller/{action}")]
+        private class AttributeRoutingOnTheController : Controller
+        {
+            public void Action1()
+            {
+            }
+
+            public void Action2()
+            {
+            }
+
+            public void Action2(string name)
+            {
+            }
+        }
+
+        private class MatchAttribute : ActionMethodSelectorAttribute
+        {
+            private bool _match;
+
+            public MatchAttribute(bool match)
+            {
+                _match = match;
+            }
+
+            public override bool IsValidForRequest(ControllerContext controllerContext, MethodInfo methodInfo)
+            {
+                return _match;
             }
         }
     }

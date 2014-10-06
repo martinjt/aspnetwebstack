@@ -7,13 +7,14 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Web.Http.Controllers;
 using System.Web.Http.Hosting;
+using System.Web.Http.Services;
 
 namespace System.Web.Http.Tracing.Tracers
 {
     /// <summary>
     /// Tracer for <see cref="IHttpController"/>.
     /// </summary>
-    internal class HttpControllerTracer : IHttpController, IDisposable
+    internal class HttpControllerTracer : IHttpController, IDisposable, IDecorator<IHttpController>
     {
         private const string DisposeMethodName = "Dispose";
         private const string ExecuteAsyncMethodName = "ExecuteAsync";
@@ -30,6 +31,11 @@ namespace System.Web.Http.Tracing.Tracers
             _innerController = innerController;
             _request = request;
             _traceWriter = traceWriter;
+        }
+
+        public IHttpController Inner
+        {
+            get { return _innerController; }
         }
 
         void IDisposable.Dispose()
@@ -63,25 +69,7 @@ namespace System.Web.Http.Tracing.Tracers
                 {
                     // Critical to allow wrapped controller to have itself in ControllerContext
                     controllerContext.Controller = ActualController(controllerContext.Controller);
-                    return _innerController.ExecuteAsync(controllerContext, cancellationToken)
-                                           .Finally(() =>
-                                           {
-                                               IDisposable disposable = _innerController as IDisposable;
-
-                                               if (disposable != null)
-                                               {
-                                                   // Need to remove the original controller from the disposables list, if it's
-                                                   // there, and put ourselves in there instead, so we can trace the dispose.
-                                                   // This currently knows a little too much about how RegisterForDispose works,
-                                                   // but that's unavoidable unless we want to offer UnregisterForDispose.
-                                                   IList<IDisposable> disposables;
-                                                   if (_request.Properties.TryGetValue(HttpPropertyKeys.DisposableRequestResourcesKey, out disposables))
-                                                   {
-                                                       disposables.Remove(disposable);
-                                                       disposables.Add(this);
-                                                   }
-                                               }
-                                           });
+                    return ExecuteAsyncCore(controllerContext, cancellationToken);
                 },
                 endTrace: (tr, response) =>
                 {
@@ -91,6 +79,32 @@ namespace System.Web.Http.Tracing.Tracers
                     }
                 },
                 errorTrace: null);
+        }
+
+        private async Task<HttpResponseMessage> ExecuteAsyncCore(HttpControllerContext controllerContext, CancellationToken cancellationToken)
+        {
+            try
+            {
+                return await _innerController.ExecuteAsync(controllerContext, cancellationToken);
+            }
+            finally
+            {
+                IDisposable disposable = _innerController as IDisposable;
+
+                if (disposable != null)
+                {
+                    // Need to remove the original controller from the disposables list, if it's
+                    // there, and put ourselves in there instead, so we can trace the dispose.
+                    // This currently knows a little too much about how RegisterForDispose works,
+                    // but that's unavoidable unless we want to offer UnregisterForDispose.
+                    IList<IDisposable> disposables;
+                    if (_request.Properties.TryGetValue(HttpPropertyKeys.DisposableRequestResourcesKey, out disposables))
+                    {
+                        disposables.Remove(disposable);
+                        disposables.Add(this);
+                    }
+                }
+            }
         }
 
         public static IHttpController ActualController(IHttpController controller)

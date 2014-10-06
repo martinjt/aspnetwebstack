@@ -7,6 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Web.Http.Controllers;
 using System.Web.Http.Hosting;
+using System.Web.Http.Services;
 using Microsoft.TestCommon;
 using Moq;
 
@@ -75,7 +76,7 @@ namespace System.Web.Http.Tracing.Tracers
             var mockDisposable = mockController.As<IDisposable>();
             mockController.Setup(c => c.ExecuteAsync(context, CancellationToken.None))
                           .Callback<HttpControllerContext, CancellationToken>((cc, ct) => cc.Request.RegisterForDispose(mockDisposable.Object))
-                          .Returns(() => TaskHelpers.FromResult(new HttpResponseMessage()))
+                          .Returns(() => Task.FromResult(new HttpResponseMessage()))
                           .Verifiable();
             context.ControllerDescriptor = _controllerDescriptor;
             context.Controller = mockController.Object;
@@ -97,7 +98,7 @@ namespace System.Web.Http.Tracing.Tracers
             // Arrange
             HttpResponseMessage response = new HttpResponseMessage();
             Mock<ApiController> mockController = new Mock<ApiController>() { CallBase = true };
-            mockController.Setup(b => b.ExecuteAsync(It.IsAny<HttpControllerContext>(), It.IsAny<CancellationToken>())).Returns(TaskHelpers.FromResult<HttpResponseMessage>(response));
+            mockController.Setup(b => b.ExecuteAsync(It.IsAny<HttpControllerContext>(), It.IsAny<CancellationToken>())).Returns(Task.FromResult<HttpResponseMessage>(response));
 
             HttpRequestMessage request = new HttpRequestMessage();
             HttpControllerContext controllerContext = ContextUtil.CreateControllerContext(request: request);
@@ -187,6 +188,34 @@ namespace System.Web.Http.Tracing.Tracers
 
             // Assert
             Assert.Equal<TraceRecord>(expectedTraces, traceWriter.Traces, new TraceRecordComparer());
+        }
+
+        [Fact]
+        public void Inner_Property_On_HttpControllerTracer_Returns_IHttpController()
+        {
+            // Arrange
+            IHttpController expectedInner = new Mock<IHttpController>().Object;
+            HttpControllerTracer productUnderTest = new HttpControllerTracer(new HttpRequestMessage(), expectedInner, new TestTraceWriter());
+
+            // Act
+            IHttpController actualInner = productUnderTest.Inner;
+
+            // Assert
+            Assert.Same(expectedInner, actualInner);
+        }
+
+        [Fact]
+        public void Decorator_GetInner_On_HttpControllerTracer_Returns_IHttpController()
+        {
+            // Arrange
+            IHttpController expectedInner = new Mock<IHttpController>().Object;
+            HttpControllerTracer productUnderTest = new HttpControllerTracer(new HttpRequestMessage(), expectedInner, new TestTraceWriter());
+
+            // Act
+            IHttpController actualInner = Decorator.GetInner(productUnderTest as IHttpController);
+
+            // Assert
+            Assert.Same(expectedInner, actualInner);
         }
     }
 }

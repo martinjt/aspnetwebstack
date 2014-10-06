@@ -10,7 +10,7 @@ namespace System.Web.Mvc
     {
         bool IBuildManager.FileExists(string virtualPath)
         {
-            return BuildManager.GetObjectFactory(virtualPath, false) != null;
+            return BuildManager.GetObjectFactory(virtualPath, throwIfNotFound: false) != null;
         }
 
         Type IBuildManager.GetCompiledType(string virtualPath)

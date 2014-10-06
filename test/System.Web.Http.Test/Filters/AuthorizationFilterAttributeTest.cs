@@ -54,7 +54,7 @@ namespace System.Web.Http.Filters
             Func<Task<HttpResponseMessage>> continuation = () =>
             {
                 flagWhenContinuationInvoked = onActionExecutingInvoked;
-                return TaskHelpers.FromResult(new HttpResponseMessage());
+                return Task.FromResult(new HttpResponseMessage());
             };
             var filter = (IAuthorizationFilter)filterMock.Object;
 
@@ -96,7 +96,11 @@ namespace System.Web.Http.Filters
             // Arrange
             Exception e = new Exception();
             HttpActionContext context = ContextUtil.CreateActionContext();
-            Mock<AuthorizationFilterAttribute> filterMock = new Mock<AuthorizationFilterAttribute>();
+            Mock<AuthorizationFilterAttribute> filterMock = new Mock<AuthorizationFilterAttribute>()
+            {
+                CallBase = true,
+            };
+
             filterMock.Setup(f => f.OnAuthorization(It.IsAny<HttpActionContext>())).Throws(e);
             var filter = (IAuthorizationFilter)filterMock.Object;
             bool continuationCalled = false;
@@ -120,13 +124,13 @@ namespace System.Web.Http.Filters
         {
             // Arrange
             HttpActionContext context = ContextUtil.CreateActionContext();
-            Mock<AuthorizationFilterAttribute> filterMock = new Mock<AuthorizationFilterAttribute>() { CallBase = false };
+            Mock<AuthorizationFilterAttribute> filterMock = new Mock<AuthorizationFilterAttribute>() { CallBase = true };
             var filter = (IAuthorizationFilter)filterMock.Object;
 
             // Act
             filter.ExecuteAuthorizationFilterAsync(context, CancellationToken.None, () =>
             {
-                return TaskHelpers.FromResult(new HttpResponseMessage());
+                return Task.FromResult(new HttpResponseMessage());
             }).Wait();
 
             // Assert
@@ -138,7 +142,11 @@ namespace System.Web.Http.Filters
         {
             // Arrange
             HttpActionContext context = ContextUtil.CreateActionContext();
-            Mock<AuthorizationFilterAttribute> filterMock = new Mock<AuthorizationFilterAttribute>();
+            Mock<AuthorizationFilterAttribute> filterMock = new Mock<AuthorizationFilterAttribute>()
+            {
+                CallBase = true,
+            };
+
             var filter = (IAuthorizationFilter)filterMock.Object;
 
             // Act
@@ -154,12 +162,16 @@ namespace System.Web.Http.Filters
         {
             // Arrange
             HttpActionContext context = ContextUtil.CreateActionContext();
-            Mock<AuthorizationFilterAttribute> filterMock = new Mock<AuthorizationFilterAttribute>();
+            Mock<AuthorizationFilterAttribute> filterMock = new Mock<AuthorizationFilterAttribute>()
+            {
+                CallBase = true,
+            };
+
             var filter = (IAuthorizationFilter)filterMock.Object;
             HttpResponseMessage response = new HttpResponseMessage();
 
             // Act
-            var result = filter.ExecuteAuthorizationFilterAsync(context, CancellationToken.None, () => TaskHelpers.FromResult(response));
+            var result = filter.ExecuteAuthorizationFilterAsync(context, CancellationToken.None, () => Task.FromResult(response));
 
             // Assert
             result.WaitUntilCompleted();
@@ -171,7 +183,11 @@ namespace System.Web.Http.Filters
         {
             // Arrange
             HttpActionContext context = ContextUtil.CreateActionContext();
-            Mock<AuthorizationFilterAttribute> filterMock = new Mock<AuthorizationFilterAttribute>();
+            Mock<AuthorizationFilterAttribute> filterMock = new Mock<AuthorizationFilterAttribute>()
+            {
+                CallBase = true,
+            };
+
             var filter = (IAuthorizationFilter)filterMock.Object;
             Exception exception = new Exception();
 

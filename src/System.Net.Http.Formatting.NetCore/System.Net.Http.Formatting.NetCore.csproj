@@ -2,68 +2,27 @@
 <Project ToolsVersion="4.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <Import Project="$([MSBuild]::GetDirectoryNameOfFileAbove($(MSBuildThisFileDirectory),Runtime.sln))\tools\WebStack.settings.targets" />
   <PropertyGroup>
-    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
-    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
-    <ProductVersion>8.0.30703</ProductVersion>
-    <SchemaVersion>2.0</SchemaVersion>
     <ProjectGuid>{C7060639-719B-4BD2-8A37-2F146B5A0668}</ProjectGuid>
     <OutputType>Library</OutputType>
     <AppDesignerFolder>Properties</AppDesignerFolder>
     <RootNamespace>System.Net.Http</RootNamespace>
     <AssemblyName>System.Net.Http.Formatting</AssemblyName>
-    <DefaultLanguage>en-US</DefaultLanguage>
+    <OutputPath>$(OutputPath)NetCore\</OutputPath>
+    <DocumentationFile>$(OutputPath)$(AssemblyName).xml</DocumentationFile>
+    <RunCodeAnalysis>$(CodeAnalysis)</RunCodeAnalysis>
+    <CodeAnalysisRuleSet>..\Strict.ruleset</CodeAnalysisRuleSet>
+    <CodeAnalysisAdditionalOptions> /assemblycomparemode:StrongNameIgnoringVersion</CodeAnalysisAdditionalOptions>
+    <CodeAnalysisSearchGlobalAssemblyCache>false</CodeAnalysisSearchGlobalAssemblyCache>
+    <DefineConstants>$(DefineConstants);NETFX_CORE;ASPNETMVC;NOT_CLS_COMPLIANT</DefineConstants>
+    <TargetFrameworkProfile>Profile259</TargetFrameworkProfile>
+    <ProjectTypeGuids>{786C830F-07A1-408B-BD7F-6EE04809D6DB};{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}</ProjectTypeGuids>
+    <MinimumVisualStudioVersion>11.0</MinimumVisualStudioVersion>
+    <NoWarn>1591</NoWarn>
     <TargetFrameworkVersion>v4.5</TargetFrameworkVersion>
-    <FileAlignment>512</FileAlignment>
-    <ProjectTypeGuids>{BC8A1FFA-BEE3-4634-8014-F334798102B3};{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}</ProjectTypeGuids>
-    <SolutionDir Condition="$(SolutionDir) == '' Or $(SolutionDir) == '*Undefined*'">..\..\</SolutionDir>
-    <RestorePackages>true</RestorePackages>
-  </PropertyGroup>
-  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
-    <DebugSymbols>true</DebugSymbols>
-    <DebugType>full</DebugType>
-    <Optimize>false</Optimize>
-    <OutputPath>..\..\bin\Debug\NetCore\</OutputPath>
-    <DefineConstants>DEBUG;TRACE;CODE_ANALYSIS;NETFX_CORE;ASPNETMVC</DefineConstants>
-    <ErrorReport>prompt</ErrorReport>
-    <WarningLevel>4</WarningLevel>
-    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-    <NoWarn>1591</NoWarn>
-    <DocumentationFile>$(OutputPath)$(AssemblyName).xml</DocumentationFile>
-    <RunCodeAnalysis>false</RunCodeAnalysis>
-    <CodeAnalysisRuleSet>..\Strict.ruleset</CodeAnalysisRuleSet>
-  </PropertyGroup>
-  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
-    <DebugType>pdbonly</DebugType>
-    <Optimize>true</Optimize>
-    <OutputPath>..\..\bin\Release\NetCore\</OutputPath>
-    <DefineConstants>TRACE;NETFX_CORE;ASPNETMVC</DefineConstants>
-    <ErrorReport>prompt</ErrorReport>
-    <WarningLevel>4</WarningLevel>
-    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-    <NoWarn>1591</NoWarn>
-    <DocumentationFile>$(OutputPath)$(AssemblyName).xml</DocumentationFile>
-    <RunCodeAnalysis>false</RunCodeAnalysis>
-    <CodeAnalysisRuleSet>..\Strict.ruleset</CodeAnalysisRuleSet>
-  </PropertyGroup>
-  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'CodeAnalysis|AnyCPU' ">
-    <DebugType>pdbonly</DebugType>
-    <Optimize>true</Optimize>
-    <OutputPath>..\..\bin\CodeAnalysis\NetCore\</OutputPath>
-    <DefineConstants>TRACE;CODE_ANALYSIS;NETFX_CORE;ASPNETMVC</DefineConstants>
-    <ErrorReport>prompt</ErrorReport>
-    <WarningLevel>4</WarningLevel>
-    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-    <NoWarn>1591</NoWarn>
-    <DocumentationFile>$(OutputPath)$(AssemblyName).xml</DocumentationFile>
-    <RunCodeAnalysis>false</RunCodeAnalysis>
-    <CodeAnalysisRuleSet>..\Strict.ruleset</CodeAnalysisRuleSet>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="..\CommonAssemblyInfo.cs">
       <Link>Properties\CommonAssemblyInfo.cs</Link>
-    </Compile>
-    <Compile Include="..\Common\DictionaryExtensions.cs">
-      <Link>Common\DictionaryExtensions.cs</Link>
     </Compile>
     <Compile Include="..\Common\Error.cs">
       <Link>Common\Error.cs</Link>
@@ -77,11 +36,29 @@
     <Compile Include="..\Common\UriQueryUtility.cs">
       <Link>Common\UriQueryUtility.cs</Link>
     </Compile>
+    <Compile Include="..\Common\CollectionExtensions.cs">
+      <Link>Common\CollectionExtensions.cs</Link>
+    </Compile>
+    <Compile Include="..\Common\ListWrapperCollection.cs">
+      <Link>Common\ListWrapperCollection.cs</Link>
+    </Compile>
     <Compile Include="..\System.Net.Http.Formatting\FormattingUtilities.cs">
       <Link>FormattingUtilities.cs</Link>
     </Compile>
+    <Compile Include="..\System.Net.Http.Formatting\Formatting\BaseJsonMediaTypeFormatter.cs">
+      <Link>Formatting\BaseJsonMediaTypeFormatter.cs</Link>
+    </Compile>
+    <Compile Include="..\System.Net.Http.Formatting\Formatting\BsonMediaTypeFormatter.cs">
+      <Link>Formatting\BsonMediaTypeFormatter.cs</Link>
+    </Compile>
     <Compile Include="..\System.Net.Http.Formatting\Formatting\DelegatingEnumerable.cs">
       <Link>Formatting\DelegatingEnumerable.cs</Link>
+    </Compile>
+    <Compile Include="..\System.Net.Http.Formatting\Formatting\FormDataCollection.cs">
+      <Link>Formatting\FormDataCollection.cs</Link>
+    </Compile>
+    <Compile Include="..\System.Net.Http.Formatting\Formatting\FormUrlEncodedJson.cs">
+      <Link>Formatting\FormUrlEncodedJson.cs</Link>
     </Compile>
     <Compile Include="..\System.Net.Http.Formatting\Formatting\IFormatterLogger.cs">
       <Link>Formatting\IFormatterLogger.cs</Link>
@@ -106,6 +83,9 @@
     </Compile>
     <Compile Include="..\System.Net.Http.Formatting\Formatting\ParsedMediaTypeHeaderValue.cs">
       <Link>Formatting\ParsedMediaTypeHeaderValue.cs</Link>
+    </Compile>
+    <Compile Include="..\System.Net.Http.Formatting\Formatting\Parsers\FormUrlEncodedParser.cs">
+      <Link>Formatting\Parsers\FormUrlEncodedParser.cs</Link>
     </Compile>
     <Compile Include="..\System.Net.Http.Formatting\Formatting\Parsers\HttpRequestHeaderParser.cs">
       <Link>Formatting\Parsers\HttpRequestHeaderParser.cs</Link>
@@ -137,9 +117,13 @@
     <Compile Include="..\System.Net.Http.Formatting\Formatting\XmlMediaTypeFormatter.cs">
       <Link>Formatting\XmlMediaTypeFormatter.cs</Link>
     </Compile>
-    <Compile Include="..\System.Net.Http.Formatting\GlobalSuppressions.cs">
-      <Link>GlobalSuppressions.cs</Link>
+    <Compile Include="..\System.Net.Http.Formatting\Internal\HttpValueCollection.cs">
+      <Link>HttpValueCollection.cs</Link>
     </Compile>
+    <Compile Include="..\System.Net.Http.Formatting\UriExtensions.cs">
+      <Link>UriExtensions.cs</Link>
+    </Compile>
+    <Compile Include="GlobalSuppressions.cs" />
     <Compile Include="..\System.Net.Http.Formatting\Handlers\HttpProgressEventArgs.cs">
       <Link>Handlers\HttpProgressEventArgs.cs</Link>
     </Compile>
@@ -227,6 +211,10 @@
       <DesignTime>True</DesignTime>
       <DependentUpon>Resources.resx</DependentUpon>
     </Compile>
+    <Compile Include="..\System.Net.Http.Formatting\UnsupportedMediaTypeException.cs">
+      <Link>UnsupportedMediaTypeException.cs</Link>
+    </Compile>
+    <Compile Include="Internal\ConcurrentDictionary.cs" />
     <Compile Include="MediaTypeHeaderValueExtensions.cs" />
   </ItemGroup>
   <ItemGroup>
@@ -249,6 +237,7 @@
       <Link>Properties\Resources.resx</Link>
       <Generator>ResXFileCodeGenerator</Generator>
       <LastGenOutput>Resources.Designer.cs</LastGenOutput>
+      <SubType>Designer</SubType>
     </EmbeddedResource>
   </ItemGroup>
   <ItemGroup>
@@ -257,18 +246,22 @@
     </CodeAnalysisDictionary>
   </ItemGroup>
   <ItemGroup>
-    <Reference Include="Newtonsoft.Json, Version=4.5.0.0, Culture=neutral, PublicKeyToken=30ad4fe6b2a6aeed, processorArchitecture=MSIL">
-      <HintPath>..\..\packages\Newtonsoft.Json.4.5.8\lib\winrt45\Newtonsoft.Json.dll</HintPath>
-      <Private>False</Private>
-    </Reference>
-  </ItemGroup>
-  <ItemGroup>
     <None Include="packages.config" />
   </ItemGroup>
-  <PropertyGroup Condition=" '$(VisualStudioVersion)' == '' or '$(VisualStudioVersion)' &lt; '11.0' ">
-    <VisualStudioVersion>11.0</VisualStudioVersion>
-  </PropertyGroup>
-  <Import Project="$(MSBuildExtensionsPath)\Microsoft\WindowsXaml\v$(VisualStudioVersion)\Microsoft.Windows.UI.Xaml.CSharp.targets" />
+  <ItemGroup>
+    <Reference Include="Newtonsoft.Json">
+      <HintPath>..\..\packages\Newtonsoft.Json.6.0.4\lib\portable-net45+wp80+win8+wpa81\Newtonsoft.Json.dll</HintPath>
+    </Reference>
+    <Reference Include="System.Net.Http">
+      <HintPath>..\..\packages\Microsoft.Net.Http.2.2.13\lib\portable-net40+sl4+win8+wp71\System.Net.Http.dll</HintPath>
+    </Reference>
+    <Reference Include="System.Net.Http.Extensions">
+      <HintPath>..\..\packages\Microsoft.Net.Http.2.2.13\lib\portable-net40+sl4+win8+wp71\System.Net.Http.Extensions.dll</HintPath>
+    </Reference>
+    <Reference Include="System.Net.Http.Primitives">
+      <HintPath>..\..\packages\Microsoft.Net.Http.2.2.13\lib\portable-net40+sl4+win8+wp71\System.Net.Http.Primitives.dll</HintPath>
+    </Reference>
+  </ItemGroup>
   <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 
        Other similar extension points exist, see Microsoft.Common.targets.
   <Target Name="BeforeBuild">
@@ -276,5 +269,6 @@
   <Target Name="AfterBuild">
   </Target>
   -->
-  <Import Project="$(SolutionDir)\.nuget\nuget.targets" />
+  <Import Project="$(MSBuildExtensionsPath32)\Microsoft\Portable\$(TargetFrameworkVersion)\Microsoft.Portable.CSharp.targets" />
+  <Import Project="..\..\packages\Microsoft.Bcl.Build.1.0.8\tools\Microsoft.Bcl.Build.targets" />
 </Project>

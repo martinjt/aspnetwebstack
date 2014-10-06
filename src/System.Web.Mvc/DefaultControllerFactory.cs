@@ -2,10 +2,14 @@
 
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.Diagnostics.Contracts;
 using System.Globalization;
 using System.Linq;
+using System.Reflection;
 using System.Text;
 using System.Web.Mvc.Properties;
+using System.Web.Mvc.Routing;
 using System.Web.Routing;
 using System.Web.SessionState;
 
@@ -110,16 +114,37 @@ namespace System.Web.Mvc
             return new InvalidOperationException(errorText);
         }
 
+        private static InvalidOperationException CreateDirectRouteAmbiguousControllerException(ICollection<Type> matchingTypes)
+        {
+            // we need to generate an exception containing all the controller types
+            StringBuilder typeList = new StringBuilder();
+            foreach (Type matchedType in matchingTypes)
+            {
+                typeList.AppendLine();
+                typeList.Append(matchedType.FullName);
+            }
+
+            string errorText = String.Format(
+                CultureInfo.CurrentCulture,
+                MvcResources.DefaultControllerFactory_DirectRouteAmbiguous,
+                typeList,
+                Environment.NewLine);
+
+            return new InvalidOperationException(errorText);
+        }
+
         public virtual IController CreateController(RequestContext requestContext, string controllerName)
         {
             if (requestContext == null)
             {
                 throw new ArgumentNullException("requestContext");
             }
-            if (String.IsNullOrEmpty(controllerName))
+
+            if (String.IsNullOrEmpty(controllerName) && !requestContext.RouteData.HasDirectRouteMatch())
             {
                 throw new ArgumentException(MvcResources.Common_NullOrEmpty, "controllerName");
             }
+
             Type controllerType = GetControllerType(requestContext, controllerName);
             IController controller = GetControllerInstance(requestContext, controllerType);
             return controller;
@@ -168,24 +193,36 @@ namespace System.Web.Mvc
 
         protected internal virtual Type GetControllerType(RequestContext requestContext, string controllerName)
         {
-            if (String.IsNullOrEmpty(controllerName))
+            if (requestContext == null)
+            {
+                throw new ArgumentNullException("requestContext");
+            }
+
+            if (String.IsNullOrEmpty(controllerName) &&
+                (requestContext.RouteData == null || !requestContext.RouteData.HasDirectRouteMatch()))
             {
                 throw new ArgumentException(MvcResources.Common_NullOrEmpty, "controllerName");
+            }
+
+            RouteData routeData = requestContext.RouteData;
+            if (routeData != null && routeData.HasDirectRouteMatch())
+            {
+                return GetControllerTypeFromDirectRoute(routeData);
             }
 
             // first search in the current route's namespace collection
             object routeNamespacesObj;
             Type match;
-            if (requestContext != null && requestContext.RouteData.DataTokens.TryGetValue("Namespaces", out routeNamespacesObj))
+            if (routeData.DataTokens.TryGetValue(RouteDataTokenKeys.Namespaces, out routeNamespacesObj))
             {
                 IEnumerable<string> routeNamespaces = routeNamespacesObj as IEnumerable<string>;
                 if (routeNamespaces != null && routeNamespaces.Any())
                 {
                     HashSet<string> namespaceHash = new HashSet<string>(routeNamespaces, StringComparer.OrdinalIgnoreCase);
-                    match = GetControllerTypeWithinNamespaces(requestContext.RouteData.Route, controllerName, namespaceHash);
+                    match = GetControllerTypeWithinNamespaces(routeData.Route, controllerName, namespaceHash);
 
                     // the UseNamespaceFallback key might not exist, in which case its value is implicitly "true"
-                    if (match != null || false.Equals(requestContext.RouteData.DataTokens["UseNamespaceFallback"]))
+                    if (match != null || false.Equals(routeData.DataTokens[RouteDataTokenKeys.UseNamespaceFallback]))
                     {
                         // got a match or the route requested we stop looking
                         return match;
@@ -197,7 +234,7 @@ namespace System.Web.Mvc
             if (ControllerBuilder.DefaultNamespaces.Count > 0)
             {
                 HashSet<string> namespaceDefaults = new HashSet<string>(ControllerBuilder.DefaultNamespaces, StringComparer.OrdinalIgnoreCase);
-                match = GetControllerTypeWithinNamespaces(requestContext.RouteData.Route, controllerName, namespaceDefaults);
+                match = GetControllerTypeWithinNamespaces(routeData.Route, controllerName, namespaceDefaults);
                 if (match != null)
                 {
                     return match;
@@ -205,7 +242,50 @@ namespace System.Web.Mvc
             }
 
             // if all else fails, search every namespace
-            return GetControllerTypeWithinNamespaces(requestContext.RouteData.Route, controllerName, null /* namespaces */);
+            return GetControllerTypeWithinNamespaces(routeData.Route, controllerName, null /* namespaces */);
+        }
+
+        private static Type GetControllerTypeFromDirectRoute(RouteData routeData)
+        {
+            Contract.Assert(routeData != null);
+
+            var matchingRouteDatas = routeData.GetDirectRouteMatches();
+
+            List<Type> controllerTypes = new List<Type>();
+            foreach (var directRouteData in matchingRouteDatas)
+            {
+                if (directRouteData != null)
+                {
+                    Type controllerType = directRouteData.GetTargetControllerType();
+                    if (controllerType == null)
+                    {
+                        // We don't expect this to happen, but it could happen if some code messes with the 
+                        // route data tokens and removes the key we're looking for. 
+                        throw new InvalidOperationException(MvcResources.DirectRoute_MissingControllerType);
+                    }
+
+                    if (!controllerTypes.Contains(controllerType))
+                    {
+                        controllerTypes.Add(controllerType);
+                    }
+                }
+            }
+
+            // We only want to handle the case where all matched direct routes refer to the same controller.
+            // Handling the multiple-controllers case would put attribute routing down a totally different
+            // path than traditional routing.
+            if (controllerTypes.Count == 0)
+            {
+                return null;
+            }
+            else if (controllerTypes.Count == 1)
+            {
+                return controllerTypes[0];
+            }
+            else
+            {
+                throw CreateDirectRouteAmbiguousControllerException(controllerTypes);
+            }
         }
 
         private Type GetControllerTypeWithinNamespaces(RouteBase route, string controllerName, HashSet<string> namespaces)
@@ -237,6 +317,12 @@ namespace System.Web.Mvc
             {
                 disposable.Dispose();
             }
+        }
+
+        internal IReadOnlyList<Type> GetControllerTypes()
+        {
+            ControllerTypeCache.EnsureInitialized(BuildManager);
+            return ControllerTypeCache.GetControllerTypes();
         }
 
         SessionStateBehavior IControllerFactory.GetControllerSessionBehavior(RequestContext requestContext, string controllerName)

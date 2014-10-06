@@ -5,7 +5,9 @@ using System.Net;
 using System.Net.Http;
 using System.Net.Http.Formatting;
 using System.Net.Http.Headers;
+using System.Threading;
 using System.Threading.Tasks;
+using System.Web.Http.Services;
 
 namespace System.Web.Http.Tracing.Tracers
 {
@@ -13,17 +15,16 @@ namespace System.Web.Http.Tracing.Tracers
     /// Tracer for <see cref="FormUrlEncodedMediaTypeFormatter"/>.  
     /// It is required because users can select formatters by this type.
     /// </summary>
-    internal class FormUrlEncodedMediaTypeFormatterTracer : FormUrlEncodedMediaTypeFormatter, IFormatterTracer
+    internal class FormUrlEncodedMediaTypeFormatterTracer : FormUrlEncodedMediaTypeFormatter, IFormatterTracer, IDecorator<FormUrlEncodedMediaTypeFormatter>
     {
+        private readonly FormUrlEncodedMediaTypeFormatter _inner;
         private MediaTypeFormatterTracer _innerTracer;
-        public FormUrlEncodedMediaTypeFormatterTracer(FormUrlEncodedMediaTypeFormatter innerFormatter, ITraceWriter traceWriter, HttpRequestMessage request)
-        {
-            _innerTracer = new MediaTypeFormatterTracer(innerFormatter, traceWriter, request);
 
-            // copy non-overridable members from inner formatter
-            _innerTracer.CopyNonOverriableMembersFromInner(this);
-            MaxDepth = innerFormatter.MaxDepth;
-            ReadBufferSize = innerFormatter.ReadBufferSize;
+        public FormUrlEncodedMediaTypeFormatterTracer(FormUrlEncodedMediaTypeFormatter innerFormatter, ITraceWriter traceWriter, HttpRequestMessage request)
+            : base(innerFormatter)
+        {
+            _inner = innerFormatter;
+            _innerTracer = new MediaTypeFormatterTracer(innerFormatter, traceWriter, request);
         }
 
         HttpRequestMessage IFormatterTracer.Request
@@ -31,9 +32,26 @@ namespace System.Web.Http.Tracing.Tracers
             get { return _innerTracer.Request; }
         }
 
+        public FormUrlEncodedMediaTypeFormatter Inner
+        {
+            get { return _inner; }
+        }
+
         public MediaTypeFormatter InnerFormatter
         {
             get { return _innerTracer.InnerFormatter; }
+        }
+
+        public override IRequiredMemberSelector RequiredMemberSelector
+        {
+            get
+            {
+                return _innerTracer.RequiredMemberSelector;
+            }
+            set
+            {
+                _innerTracer.RequiredMemberSelector = value;
+            }
         }
 
         public override bool CanReadType(Type type)
@@ -51,9 +69,21 @@ namespace System.Web.Http.Tracing.Tracers
             return _innerTracer.GetPerRequestFormatterInstance(type, request, mediaType);
         }
 
+        public override Task<object> ReadFromStreamAsync(Type type, Stream readStream, HttpContent content,
+            IFormatterLogger formatterLogger, CancellationToken cancellationToken)
+        {
+            return _innerTracer.ReadFromStreamAsync(type, readStream, content, formatterLogger, cancellationToken);
+        }
+
         public override Task<object> ReadFromStreamAsync(Type type, Stream readStream, HttpContent content, IFormatterLogger formatterLogger)
         {
             return _innerTracer.ReadFromStreamAsync(type, readStream, content, formatterLogger);
+        }
+
+        public override Task WriteToStreamAsync(Type type, object value, Stream writeStream, HttpContent content,
+            TransportContext transportContext, CancellationToken cancellationToken)
+        {
+            return _innerTracer.WriteToStreamAsync(type, value, writeStream, content, transportContext, cancellationToken);
         }
 
         public override Task WriteToStreamAsync(Type type, object value, Stream writeStream, HttpContent content, TransportContext transportContext)

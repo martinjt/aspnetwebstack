@@ -438,6 +438,19 @@ namespace System.Web.Mvc.Test
                 "A public action method 'UnknownAction' was not found on controller 'System.Web.Mvc.Test.ControllerTest+EmptyController'.");
         }
 
+        /// <summary>
+        /// This is a scenario for attribute routing, we don't have a single action nameat this point
+        /// </summary>
+        [Fact]
+        public void HandleUnknownAction_NoActionName_Throws()
+        {
+            var controller = new EmptyController();
+            Assert.Throws<HttpException>(
+                delegate { controller.HandleUnknownAction(null); },
+                "No matching action was found on controller 'System.Web.Mvc.Test.ControllerTest+EmptyController'. " +
+                "This can happen when a controller uses RouteAttribute for routing, but no action on that controller matches the request.");
+        }
+
         [Fact]
         public void JavaScript()
         {
@@ -1789,6 +1802,57 @@ namespace System.Web.Mvc.Test
 
 
         [Fact]
+        public void CreateActionInvokerCallsAsyncActionInvokerFactoryCreateInstance()
+        {
+            // Controller uses an IDependencyResolver and an IAsyncActionInvokerFactory
+            // to create an IAsyncActionInvoker.
+            // Arrange
+            var controller = new EmptyController();
+            Mock<IDependencyResolver> resolverMock = new Mock<IDependencyResolver>();
+            Mock<IAsyncActionInvoker> asyncActionInvokerMock = new Mock<IAsyncActionInvoker>();
+            Mock<IAsyncActionInvokerFactory> asyncActionInvokerFactoryMock = new Mock<IAsyncActionInvokerFactory>();
+            asyncActionInvokerFactoryMock.Setup(a => a.CreateInstance()).Returns(asyncActionInvokerMock.Object);
+            resolverMock.Setup(r => r.GetService(typeof(IAsyncActionInvokerFactory)))
+                .Returns(asyncActionInvokerFactoryMock.Object);
+            resolverMock.Setup(r => r.GetService(typeof(IActionInvokerFactory)))
+                .Returns((IActionInvokerFactory)null);
+            controller.Resolver = resolverMock.Object;
+
+            // Act
+            var ai = controller.CreateActionInvoker();
+
+            // Assert
+            resolverMock.Verify(r => r.GetService(typeof(IAsyncActionInvokerFactory)), Times.Once());
+            resolverMock.Verify(r => r.GetService(typeof(IActionInvokerFactory)), Times.Never());
+            Assert.Same(asyncActionInvokerMock.Object, ai);
+        }
+
+        [Fact]
+        public void CreateActionInvokerCallsActionInvokerFactoryCreateInstance()
+        {
+            // Controller uses an IDependencyResolver and an IActionInvokerFactory to create an IActionInvoker.
+            // Arrange
+            var controller = new EmptyController();
+            Mock<IDependencyResolver> resolverMock = new Mock<IDependencyResolver>();
+            Mock<IActionInvoker> actionInvokerMock = new Mock<IActionInvoker>();
+            Mock<IActionInvokerFactory> actionInvokerFactoryMock = new Mock<IActionInvokerFactory>();
+            actionInvokerFactoryMock.Setup(a => a.CreateInstance()).Returns(actionInvokerMock.Object);
+            resolverMock.Setup(r => r.GetService(typeof(IAsyncActionInvokerFactory)))
+                .Returns((IAsyncActionInvokerFactory)null);
+            resolverMock.Setup(r => r.GetService(typeof(IActionInvokerFactory)))
+                .Returns(actionInvokerFactoryMock.Object);
+            controller.Resolver = resolverMock.Object;
+
+            // Act
+            var ai = controller.CreateActionInvoker();
+
+            // Assert
+            resolverMock.Verify(r => r.GetService(typeof(IAsyncActionInvokerFactory)), Times.Once());
+            resolverMock.Verify(r => r.GetService(typeof(IActionInvokerFactory)), Times.Once());
+            Assert.Same(actionInvokerMock.Object, ai);
+        }
+
+        [Fact]
         public void CreateActionInvokerCallsIntoResolverInstance()
         {
             // Controller uses an IDependencyResolver to create an IActionInvoker.
@@ -1822,7 +1886,7 @@ namespace System.Web.Mvc.Test
         [Fact]
         public void CreateTempProviderWithResolver()
         {
-            // Controller uses an IDependencyResolver to create an IActionInvoker.
+            // Controller uses an IDependencyResolver to create an ITempDataProvider.
             var controller = new EmptyController();
             Mock<IDependencyResolver> resolverMock = new Mock<IDependencyResolver>();
             Mock<ITempDataProvider> tempMock = new Mock<ITempDataProvider>();
@@ -1835,6 +1899,46 @@ namespace System.Web.Mvc.Test
             Assert.Same(tempMock.Object, temp);
         }
 
+        [Fact]
+        public void CreateTempProviderWithResolver_ITempDataProviderFactory()
+        {
+            // Controller uses an IDependencyResolver and an ITempDataProviderFactory to create an ITempDataProvider.
+            // Arrange
+            var controller = new EmptyController();
+            Mock<IDependencyResolver> resolverMock = new Mock<IDependencyResolver>();
+            Mock<ITempDataProvider> tempMock = new Mock<ITempDataProvider>();
+            Mock<ITempDataProviderFactory> factoryMock = new Mock<ITempDataProviderFactory>();
+            factoryMock.Setup(f => f.CreateInstance()).Returns(tempMock.Object);
+            resolverMock.Setup(r => r.GetService(typeof(ITempDataProvider))).Returns(tempMock.Object);
+            resolverMock.Setup(r => r.GetService(typeof(ITempDataProviderFactory))).Returns(factoryMock.Object);
+            controller.Resolver = resolverMock.Object;
+
+            // Act
+            ITempDataProvider temp = controller.CreateTempDataProvider();
+
+            // Assert
+            // Times.Once() and Times.Never() confirm the order.
+            resolverMock.Verify(r => r.GetService(typeof(ITempDataProviderFactory)), Times.Once());
+            resolverMock.Verify(r => r.GetService(typeof(ITempDataProvider)), Times.Never());
+            Assert.Same(tempMock.Object, temp);
+        }
+
+        [Fact]
+        public void CanMock_UrlHelper()
+        {
+            // Arrange
+            var controller = new UrlHelperController();
+            Mock<UrlHelper> urlHelper = new Mock<UrlHelper>();
+            urlHelper.Setup(u => u.Action("SimpleAction", new { ID = 42 })).Verifiable();
+            controller.Url = urlHelper.Object;
+
+            // Act
+            controller.SimpleAction();
+
+            // Assert
+            urlHelper.Verify();
+        }
+
         private class TryValidateModelModel
         {
             [Range(10, 20, ErrorMessage = "Out of range!")]
@@ -1842,6 +1946,14 @@ namespace System.Web.Mvc.Test
         }
 
         // Helpers
+
+        private class UrlHelperController : Controller
+        {
+            public string SimpleAction()
+            {
+                return Url.Action("SimpleAction", new { ID = 42 });
+            }
+        }
 
         private class SimpleController : Controller
         {

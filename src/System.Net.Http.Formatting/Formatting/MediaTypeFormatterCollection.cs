@@ -17,6 +17,8 @@ namespace System.Net.Http.Formatting
     {
         private static readonly Type _mediaTypeFormatterType = typeof(MediaTypeFormatter);
 
+        private MediaTypeFormatter[] _writingFormatters;
+
         /// <summary>
         /// Initializes a new instance of the <see cref="MediaTypeFormatterCollection"/> class.
         /// </summary>
@@ -38,6 +40,8 @@ namespace System.Net.Http.Formatting
             VerifyAndSetFormatters(formatters);
         }
 
+        internal event EventHandler Changing;
+
         /// <summary>
         /// Gets the <see cref="MediaTypeFormatter"/> to use for Xml.
         /// </summary>
@@ -54,7 +58,7 @@ namespace System.Net.Http.Formatting
             get { return Items.OfType<JsonMediaTypeFormatter>().FirstOrDefault(); }
         }
 
-#if !NETFX_CORE
+#if !NETFX_CORE // FormUrlEncodedMediaTypeFormatter is not supported in portable library.
         /// <summary>
         /// Gets the <see cref="MediaTypeFormatter"/> to use for <c>application/x-www-form-urlencoded</c> data.
         /// </summary>
@@ -63,6 +67,61 @@ namespace System.Net.Http.Formatting
             get { return Items.OfType<FormUrlEncodedMediaTypeFormatter>().FirstOrDefault(); }
         }
 #endif
+
+        internal MediaTypeFormatter[] WritingFormatters
+        {
+            get
+            {
+                if (_writingFormatters == null)
+                {
+                    _writingFormatters = GetWritingFormatters();
+                }
+                return _writingFormatters;
+            }
+        }
+
+        /// <summary>
+        /// Adds the elements of the specified collection to the end of the <see cref="MediaTypeFormatterCollection"/>.
+        /// </summary>
+        /// <param name="items">
+        /// The items that should be added to the end of the <see cref="MediaTypeFormatterCollection"/>.
+        /// The items collection itself cannot be <see langword="null"/>, but it can contain elements that are
+        /// <see langword="null"/>.
+        /// </param>
+        public void AddRange(IEnumerable<MediaTypeFormatter> items)
+        {
+            if (items == null)
+            {
+                throw Error.ArgumentNull("items");
+            }
+
+            foreach (MediaTypeFormatter item in items)
+            {
+                Add(item);
+            }
+        }
+
+        /// <summary>
+        /// Inserts the elements of a collection into the <see cref="MediaTypeFormatterCollection"/> at the specified
+        /// index.
+        /// </summary>
+        /// <param name="index">The zero-based index at which the new elements should be inserted.</param>
+        /// <param name="items">
+        /// The items that should be inserted into the <see cref="MediaTypeFormatterCollection"/>. The items collection
+        /// itself cannot be <see langword="null"/>, but it can contain elements that are <see langword="null"/>.
+        /// </param>
+        public void InsertRange(int index, IEnumerable<MediaTypeFormatter> items)
+        {
+            if (items == null)
+            {
+                throw Error.ArgumentNull("items");
+            }
+
+            foreach (MediaTypeFormatter item in items)
+            {
+                Insert(index++, item);
+            }
+        }
 
         /// <summary>
         /// Helper to search a collection for a formatter that can read the .NET type in the given mediaType.
@@ -141,9 +200,53 @@ namespace System.Net.Http.Formatting
         {
             return
 #if !NETFX_CORE
-                typeof(XmlNode).IsAssignableFrom(type) || typeof(FormDataCollection).IsAssignableFrom(type) ||
+                typeof(XmlNode).IsAssignableFrom(type) ||
+                typeof(FormDataCollection).IsAssignableFrom(type) ||
 #endif
-                FormattingUtilities.IsJTokenType(type) || typeof(XObject).IsAssignableFrom(type);
+                FormattingUtilities.IsJTokenType(type) ||
+                typeof(XObject).IsAssignableFrom(type) ||
+                typeof(Type).IsAssignableFrom(type) ||
+                type == typeof(byte[]);
+        }
+
+        protected override void ClearItems()
+        {
+            OnChanging();
+            base.ClearItems();
+        }
+
+        protected override void InsertItem(int index, MediaTypeFormatter item)
+        {
+            OnChanging();
+            base.InsertItem(index, item);
+        }
+
+        protected override void RemoveItem(int index)
+        {
+            OnChanging();
+            base.RemoveItem(index);
+        }
+
+        protected override void SetItem(int index, MediaTypeFormatter item)
+        {
+            OnChanging();
+            base.SetItem(index, item);
+        }
+
+        private void OnChanging()
+        {
+            if (Changing != null)
+            {
+                Changing(this, EventArgs.Empty);
+            }
+
+            // Clear cached state
+            _writingFormatters = null;
+        }
+
+        private MediaTypeFormatter[] GetWritingFormatters()
+        {
+            return Items.Where((formatter) => formatter != null && formatter.CanWriteAnyTypes).ToArray();
         }
 
         /// <summary>

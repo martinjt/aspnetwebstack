@@ -2,7 +2,12 @@
 
 using System.Collections.Generic;
 using System.Linq;
+using System.Linq.Expressions;
 using System.Reflection;
+using System.Reflection.Emit;
+using System.Web.Mvc.Routing;
+using System.Web.Routing;
+using System.Web.Routing.Test;
 using Microsoft.TestCommon;
 
 namespace System.Web.Mvc.Test
@@ -45,7 +50,7 @@ namespace System.Web.Mvc.Test
             ActionMethodSelector selector = new ActionMethodSelector(controllerType);
 
             // Act
-            MethodInfo matchedMethod = selector.FindActionMethod(null, "OneMatch");
+            MethodInfo matchedMethod = selector.FindActionMethod(new ControllerContext(), "OneMatch");
 
             // Assert
             Assert.Equal("OneMatch", matchedMethod.Name);
@@ -63,10 +68,52 @@ namespace System.Web.Mvc.Test
             ActionMethodSelector selector = new ActionMethodSelector(controllerType);
 
             // Act
-            MethodInfo matchedMethod = selector.FindActionMethod(null, "ShouldMatchMethodWithSelectionAttribute");
+            MethodInfo matchedMethod = selector.FindActionMethod(new ControllerContext(), "ShouldMatchMethodWithSelectionAttribute");
 
             // Assert
             Assert.Equal("MethodHasSelectionAttribute1", matchedMethod.Name);
+        }
+
+        [Fact]
+        public void FindActionMethodReturnsMethodWithoutAttributeWhenOthersOptOut()
+        {
+            // Arrange
+            Type controllerType = typeof(ControllerMatchMiddleNoAttribute);
+            ActionMethodSelector selector = new ActionMethodSelector(controllerType);
+
+            // Act
+            MethodInfo matchedMethod = selector.FindActionMethod(new ControllerContext(), "MiddleMatch");
+
+            // Assert
+            Assert.Equal("MiddleMatch", matchedMethod.Name);
+        }
+
+        [Fact]
+        public void FindActionMethodReturnsMethodWithAttributeWhenOthersOptOutAndNoAttribute()
+        {
+            // Arrange
+            Type controllerType = typeof(ControllerMatchMiddleWithAttribute);
+            ActionMethodSelector selector = new ActionMethodSelector(controllerType);
+
+            // Act
+            MethodInfo matchedMethod = selector.FindActionMethod(new ControllerContext(), "MiddleMatch");
+
+            // Assert
+            Assert.Equal("MiddleMatch", matchedMethod.Name);
+        }
+
+        [Fact]
+        public void FindActionMethodReturnsMethodMultipleMatchesOverOneOptOut()
+        {
+            // Arrange
+            Type controllerType = typeof(ControllerMatchMultipleAttributes);
+            ActionMethodSelector selector = new ActionMethodSelector(controllerType);
+
+            // Act
+            MethodInfo matchedMethod = selector.FindActionMethod(new ControllerContext(), "Match");
+
+            // Assert
+            Assert.Equal("Match", matchedMethod.Name);
         }
 
         [Fact]
@@ -77,7 +124,44 @@ namespace System.Web.Mvc.Test
             ActionMethodSelector selector = new ActionMethodSelector(controllerType);
 
             // Act
-            MethodInfo matchedMethod = selector.FindActionMethod(null, "ZeroMatch");
+            MethodInfo matchedMethod = selector.FindActionMethod(new ControllerContext(), "ZeroMatch");
+
+            // Assert
+            Assert.Null(matchedMethod);
+        }
+
+        [Fact]
+        public void FindActionMethod_IgnoresDirectRouteAttributedMethods()
+        {
+            // Arrange
+            Type controllerType = typeof(WithRoutingAttributeController);
+            ActionMethodSelector selector = new ActionMethodSelector(controllerType);
+
+            // This simulates what AttributeRoutingMapper will do
+            selector.StandardRouteMethods.Remove(controllerType.GetMethod("ActionWithoutRoute"));
+            selector.StandardRouteMethods.Remove(controllerType.GetMethod("DirectRouteOnly"));
+
+            // Act
+            MethodInfo matchedMethod = selector.FindActionMethod(new ControllerContext(), "Action");
+
+            // Assert
+            Assert.NotNull(matchedMethod);
+            Assert.Equal("Action", matchedMethod.Name);
+        }
+
+        [Fact]
+        public void FindActionMethod_IgnoresDirectRouteAttributedMethods_NoMatch()
+        {
+            // Arrange
+            Type controllerType = typeof(WithRoutingAttributeController);
+            ActionMethodSelector selector = new ActionMethodSelector(controllerType);
+
+            // This simulates what AttributeRoutingMapper will do
+            selector.StandardRouteMethods.Remove(controllerType.GetMethod("ActionWithoutRoute"));
+            selector.StandardRouteMethods.Remove(controllerType.GetMethod("DirectRouteOnly"));
+
+            // Act
+            MethodInfo matchedMethod = selector.FindActionMethod(new ControllerContext(), "DirectRouteOnly");
 
             // Assert
             Assert.Null(matchedMethod);
@@ -92,7 +176,7 @@ namespace System.Web.Mvc.Test
 
             // Act & veriy
             Assert.Throws<AmbiguousMatchException>(
-                delegate { selector.FindActionMethod(null, "TwoMatch"); },
+                delegate { selector.FindActionMethod(new ControllerContext(), "TwoMatch"); },
                 "The current request for action 'TwoMatch' on controller type 'SelectionAttributeController' is ambiguous between the following action methods:" + Environment.NewLine
               + "Void TwoMatch2() on type System.Web.Mvc.Test.ActionMethodSelectorTest+SelectionAttributeController" + Environment.NewLine
               + "Void TwoMatch() on type System.Web.Mvc.Test.ActionMethodSelectorTest+SelectionAttributeController");
@@ -164,6 +248,76 @@ namespace System.Web.Mvc.Test
 #pragma warning restore 0067
         }
 
+        private class ControllerMatchMiddleNoAttribute : Controller
+        {
+            [Match(false)]
+            [ActionName("MiddleMatch")]
+            public void SkipMatchBefore()
+            {
+            }
+
+            public void MiddleMatch()
+            {
+            }
+
+            [Match(false)]
+            [ActionName("MiddleMatch")]
+            public void SkipMatchAfter()
+            {
+            }
+        }
+
+        private class ControllerMatchMultipleAttributes : Controller
+        {
+            [Match(false)]
+            [Match(true)]
+            [ActionName("Match")]
+            public void SkipMatchBeforeOneOptOut()
+            {
+            }
+
+            [Match(true)]
+            [Match(true)]
+            public void Match()
+            {
+            }
+
+            [ActionName("Match")]
+            public void SkipMatchAfterNoAttribute()
+            {
+            }
+        }
+
+        private class ControllerMatchMiddleWithAttribute : Controller
+        {
+            [Match(false)]
+            [ActionName("MiddleMatch")]
+            public void SkipMatchBeforeNonMatch()
+            {
+            }
+
+            [ActionName("MiddleMatch")]
+            public void SkipMatchBeforeNoSelection()
+            {
+            }
+
+            [Match(true)]
+            public void MiddleMatch()
+            {
+            }
+
+            [ActionName("MiddleMatch")]
+            public void SkipMatchAfterNoSelection()
+            {
+            }
+
+            [Match(false)]
+            [ActionName("MiddleMatch")]
+            public void SkipMatchAfterNonMatch()
+            {
+            }
+        }
+
         private class SelectionAttributeController : Controller
         {
             [Match(false)]
@@ -193,20 +347,39 @@ namespace System.Web.Mvc.Test
             public void MethodDoesNotHaveSelectionAttribute1()
             {
             }
+        }
 
-            private class MatchAttribute : ActionMethodSelectorAttribute
+        private class WithRoutingAttributeController : Controller
+        {
+            [Route("route")]
+            [ActionName("Action")] // to make things confusing
+            public void ActionWithoutRoute()
             {
-                private bool _match;
+            }
 
-                public MatchAttribute(bool match)
-                {
-                    _match = match;
-                }
+            public void Action()
+            {
+            }
 
-                public override bool IsValidForRequest(ControllerContext controllerContext, MethodInfo methodInfo)
-                {
-                    return _match;
-                }
+            [Route("routeonly")]
+            public void DirectRouteOnly()
+            {
+            }
+        }
+
+        [AttributeUsage(AttributeTargets.All, AllowMultiple = true)]
+        private class MatchAttribute : ActionMethodSelectorAttribute
+        {
+            private bool _match;
+
+            public MatchAttribute(bool match)
+            {
+                _match = match;
+            }
+
+            public override bool IsValidForRequest(ControllerContext controllerContext, MethodInfo methodInfo)
+            {
+                return _match;
             }
         }
     }

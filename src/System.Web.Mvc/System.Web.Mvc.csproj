@@ -2,79 +2,21 @@
 <Project ToolsVersion="4.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <Import Project="$([MSBuild]::GetDirectoryNameOfFileAbove($(MSBuildThisFileDirectory),Runtime.sln))\tools\WebStack.settings.targets" />
   <PropertyGroup>
-    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
-    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
-    <ProductVersion>9.0.30729</ProductVersion>
-    <SchemaVersion>2.0</SchemaVersion>
     <ProjectGuid>{3D3FFD8A-624D-4E9B-954B-E1C105507975}</ProjectGuid>
     <OutputType>Library</OutputType>
     <AppDesignerFolder>Properties</AppDesignerFolder>
     <RootNamespace>System.Web.Mvc</RootNamespace>
     <AssemblyName>System.Web.Mvc</AssemblyName>
-    <FileAlignment>512</FileAlignment>
-    <SolutionDir Condition="$(SolutionDir) == '' Or $(SolutionDir) == '*Undefined*'">..\..\</SolutionDir>
-    <RestorePackages>true</RestorePackages>
-  </PropertyGroup>
-  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
-    <DebugSymbols>true</DebugSymbols>
-    <DebugType>full</DebugType>
-    <Optimize>false</Optimize>
-    <OutputPath>..\..\bin\Debug\</OutputPath>
-    <DefineConstants>TRACE;DEBUG;CODE_ANALYSIS;ASPNETMVC</DefineConstants>
-    <ErrorReport>prompt</ErrorReport>
-    <WarningLevel>4</WarningLevel>
-    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-    <NoWarn>1591</NoWarn>
     <DocumentationFile>$(OutputPath)$(AssemblyName).xml</DocumentationFile>
     <RunCodeAnalysis>$(CodeAnalysis)</RunCodeAnalysis>
     <CodeAnalysisRuleSet>..\Strict.ruleset</CodeAnalysisRuleSet>
-    <BaseAddress>1609891840</BaseAddress>
-  </PropertyGroup>
-  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
-    <DebugType>pdbonly</DebugType>
-    <Optimize>true</Optimize>
-    <OutputPath>..\..\bin\Release\</OutputPath>
-    <DefineConstants>TRACE;ASPNETMVC</DefineConstants>
-    <ErrorReport>prompt</ErrorReport>
-    <WarningLevel>4</WarningLevel>
-    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <DefineConstants>$(DefineConstants);ASPNETMVC</DefineConstants>
     <NoWarn>1591</NoWarn>
-    <DocumentationFile>$(OutputPath)$(AssemblyName).xml</DocumentationFile>
-    <RunCodeAnalysis>$(CodeAnalysis)</RunCodeAnalysis>
-    <CodeAnalysisRuleSet>..\Strict.ruleset</CodeAnalysisRuleSet>
-    <BaseAddress>1609891840</BaseAddress>
-  </PropertyGroup>
-  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'CodeAnalysis|AnyCPU' ">
-    <DebugType>pdbonly</DebugType>
-    <Optimize>true</Optimize>
-    <OutputPath>..\..\bin\CodeAnalysis\</OutputPath>
-    <DefineConstants>TRACE;CODE_ANALYSIS;ASPNETMVC</DefineConstants>
-    <ErrorReport>prompt</ErrorReport>
-    <WarningLevel>4</WarningLevel>
-    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-    <NoWarn>1591</NoWarn>
-    <DocumentationFile>$(OutputPath)$(AssemblyName).xml</DocumentationFile>
-    <RunCodeAnalysis>$(CodeAnalysis)</RunCodeAnalysis>
-    <CodeAnalysisRuleSet>..\Strict.ruleset</CodeAnalysisRuleSet>
-    <BaseAddress>1609891840</BaseAddress>
-  </PropertyGroup>
-  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'CodeCoverage|AnyCPU' ">
-    <DebugSymbols>true</DebugSymbols>
-    <DebugType>full</DebugType>
-    <Optimize>false</Optimize>
-    <OutputPath>..\..\bin\CodeCoverage\</OutputPath>
-    <DefineConstants>TRACE;DEBUG;CODE_ANALYSIS;CODE_COVERAGE;ASPNETMVC</DefineConstants>
-    <ErrorReport>prompt</ErrorReport>
-    <WarningLevel>4</WarningLevel>
-    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-    <NoWarn>1591</NoWarn>
-    <DocumentationFile>$(OutputPath)$(AssemblyName).xml</DocumentationFile>
-    <RunCodeAnalysis>$(CodeAnalysis)</RunCodeAnalysis>
-    <CodeAnalysisRuleSet>..\Strict.ruleset</CodeAnalysisRuleSet>
     <BaseAddress>1609891840</BaseAddress>
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="Microsoft.Web.Infrastructure, Version=1.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35, processorArchitecture=MSIL">
+      <Private>True</Private>
       <HintPath>..\..\packages\Microsoft.Web.Infrastructure.1.0.0.0\lib\net40\Microsoft.Web.Infrastructure.dll</HintPath>
     </Reference>
     <Reference Include="System" />
@@ -96,11 +38,47 @@
     <Compile Include="..\CommonAssemblyInfo.cs">
       <Link>Properties\CommonAssemblyInfo.cs</Link>
     </Compile>
-    <Compile Include="..\Common\EnsureStackHelper.cs">
-      <Link>Common\EnsureStackHelper.cs</Link>
+    <Compile Include="..\Common\AttributeList.cs">
+      <Link>Common\AttributeList.cs</Link>
+    </Compile>
+    <Compile Include="..\Common\DictionaryExtensions.cs">
+      <Link>Common\DictionaryExtensions.cs</Link>
+    </Compile>
+    <Compile Include="..\Common\ListWrapperCollection.cs">
+      <Link>Common\ListWrapperCollection.cs</Link>
     </Compile>
     <Compile Include="..\Common\PrefixContainer.cs">
       <Link>Common\PrefixContainer.cs</Link>
+    </Compile>
+    <Compile Include="..\Common\Routing\DirectRouteBuilder.cs">
+      <Link>Routing\DirectRouteBuilder.cs</Link>
+    </Compile>
+    <Compile Include="..\Common\Routing\DirectRouteFactoryContext.cs">
+      <Link>Routing\DirectRouteFactoryContext.cs</Link>
+    </Compile>
+    <Compile Include="..\Common\Routing\IDirectRouteBuilder.cs">
+      <Link>Routing\IDirectRouteBuilder.cs</Link>
+    </Compile>
+    <Compile Include="..\Common\Routing\IDirectRouteFactory.cs">
+      <Link>Routing\IDirectRouteFactory.cs</Link>
+    </Compile>
+    <Compile Include="..\Common\Routing\IInlineConstraintResolver.cs">
+      <Link>Routing\IInlineConstraintResolver.cs</Link>
+    </Compile>
+    <Compile Include="..\Common\Routing\RouteEntry.cs">
+      <Link>Routing\RouteEntry.cs</Link>
+    </Compile>
+    <Compile Include="..\Common\Routing\RouteFactoryAttribute.cs">
+      <Link>Routing\RouteFactoryAttribute.cs</Link>
+    </Compile>
+    <Compile Include="..\Common\Routing\RouteInfoDirectRouteFactory.cs">
+      <Link>Routing\RouteInfoDirectRouteFactory.cs</Link>
+    </Compile>
+    <Compile Include="..\Common\Routing\RouteParser.cs">
+      <Link>Routing\RouteParser.cs</Link>
+    </Compile>
+    <Compile Include="..\Common\Routing\RoutePrecedence.cs">
+      <Link>Routing\RoutePrecedence.cs</Link>
     </Compile>
     <Compile Include="..\Common\TaskHelpers.cs">
       <Link>Common\TaskHelpers.cs</Link>
@@ -108,14 +86,125 @@
     <Compile Include="..\Common\TaskHelpersExtensions.cs">
       <Link>Common\TaskHelpersExtensions.cs</Link>
     </Compile>
-    <Compile Include="..\TransparentCommonAssemblyInfo.cs">
-      <Link>Properties\TransparentCommonAssemblyInfo.cs</Link>
+    <Compile Include="..\Common\Routing\Constraints\AlphaRouteConstraint.cs">
+      <Link>Routing\Constraints\AlphaRouteConstraint.cs</Link>
+    </Compile>
+    <Compile Include="..\Common\Routing\Constraints\BoolRouteConstraint.cs">
+      <Link>Routing\Constraints\BoolRouteConstraint.cs</Link>
+    </Compile>
+    <Compile Include="..\Common\Routing\Constraints\CompoundRouteConstraint.cs">
+      <Link>Routing\Constraints\CompoundRouteConstraint.cs</Link>
+    </Compile>
+    <Compile Include="..\Common\Routing\Constraints\DateTimeRouteConstraint.cs">
+      <Link>Routing\Constraints\DateTimeRouteConstraint.cs</Link>
+    </Compile>
+    <Compile Include="..\Common\Routing\Constraints\DecimalRouteConstraint.cs">
+      <Link>Routing\Constraints\DecimalRouteConstraint.cs</Link>
+    </Compile>
+    <Compile Include="..\Common\Routing\Constraints\DoubleRouteConstraint.cs">
+      <Link>Routing\Constraints\DoubleRouteConstraint.cs</Link>
+    </Compile>
+    <Compile Include="..\Common\Routing\Constraints\FloatRouteConstraint.cs">
+      <Link>Routing\Constraints\FloatRouteConstraint.cs</Link>
+    </Compile>
+    <Compile Include="..\Common\Routing\Constraints\GuidRouteConstraint.cs">
+      <Link>Routing\Constraints\GuidRouteConstraint.cs</Link>
+    </Compile>
+    <Compile Include="..\Common\Routing\Constraints\IntRouteConstraint.cs">
+      <Link>Routing\Constraints\IntRouteConstraint.cs</Link>
+    </Compile>
+    <Compile Include="..\Common\Routing\Constraints\LengthRouteConstraint.cs">
+      <Link>Routing\Constraints\LengthRouteConstraint.cs</Link>
+    </Compile>
+    <Compile Include="..\Common\Routing\Constraints\LongRouteConstraint.cs">
+      <Link>Routing\Constraints\LongRouteConstraint.cs</Link>
+    </Compile>
+    <Compile Include="..\Common\Routing\Constraints\MaxLengthRouteConstraint.cs">
+      <Link>Routing\Constraints\MaxLengthRouteConstraint.cs</Link>
+    </Compile>
+    <Compile Include="..\Common\Routing\Constraints\MaxRouteConstraint.cs">
+      <Link>Routing\Constraints\MaxRouteConstraint.cs</Link>
+    </Compile>
+    <Compile Include="..\Common\Routing\Constraints\MinLengthRouteConstraint.cs">
+      <Link>Routing\Constraints\MinLengthRouteConstraint.cs</Link>
+    </Compile>
+    <Compile Include="..\Common\Routing\Constraints\MinRouteConstraint.cs">
+      <Link>Routing\Constraints\MinRouteConstraint.cs</Link>
+    </Compile>
+    <Compile Include="..\Common\Routing\Constraints\RangeRouteConstraintBase.cs">
+      <Link>Routing\Constraints\RangeRouteConstraintBase.cs</Link>
+    </Compile>
+    <Compile Include="..\Common\Routing\Constraints\RegexRouteConstraint.cs">
+      <Link>Routing\Constraints\RegexRouteConstraint.cs</Link>
+    </Compile>
+    <Compile Include="..\Common\Routing\Constraints\OptionalRouteConstraint.cs">
+      <Link>Routing\Constraints\OptionalRouteConstraint.cs</Link>
+    </Compile>
+    <Compile Include="..\Common\Routing\DefaultInlineConstraintResolver.cs">
+      <Link>Routing\DefaultInlineConstraintResolver.cs</Link>
+    </Compile>
+    <Compile Include="..\Common\Routing\InlineRouteTemplateParser.cs">
+      <Link>Routing\InlineRouteTemplateParser.cs</Link>
+    </Compile>
+    <Compile Include="..\Common\Routing\SubRouteCollection.cs">
+      <Link>Routing\SubRouteCollection.cs</Link>
+    </Compile>
+    <Compile Include="..\Common\Routing\IRoutePrefix.cs">
+      <Link>Routing\IRoutePrefix.cs</Link>
+    </Compile>
+    <Compile Include="ActionMethodSelectorBase.cs" />
+    <Compile Include="ActionNameSelector.cs" />
+    <Compile Include="AreaReference.cs" />
+    <Compile Include="ControllerDescriptorExtensions.cs" />
+    <Compile Include="Async\IAsyncActionInvokerFactory.cs" />
+    <Compile Include="CopyOnWriteDictionary.cs" />
+    <Compile Include="IActionInvokerFactory.cs" />
+    <Compile Include="IMethodInfoActionDescriptor.cs" />
+    <Compile Include="ITempDataProviderFactory.cs" />
+    <Compile Include="JQueryFormValueProvider.cs" />
+    <Compile Include="JQueryFormValueProviderFactory.cs" />
+    <Compile Include="Routing\DefaultDirectRouteProvider.cs" />
+    <Compile Include="Routing\IDirectRouteProvider.cs" />
+    <Compile Include="SelectListGroup.cs" />
+    <Compile Include="Html\EnumHelper.cs" />
+    <Compile Include="MaxLengthAttributeAdapter.cs" />
+    <Compile Include="MinLengthAttributeAdapter.cs" />
+    <Compile Include="Properties\MvcResources.Designer.cs">
+      <AutoGen>True</AutoGen>
+      <DesignTime>True</DesignTime>
+      <DependentUpon>MvcResources.resx</DependentUpon>
+    </Compile>
+    <Compile Include="Routing\ConstraintValidation.cs" />
+    <Compile Include="Routing\DirectRouteCandidate.cs" />
+    <Compile Include="Routing\LinkGenerationRoute.cs" />
+    <Compile Include="Routing\RouteCollectionRoute.cs" />
+    <Compile Include="Routing\ParsedRoute.cs" />
+    <Compile Include="..\Common\Routing\PathContentSegment.cs">
+      <Link>Routing\PathContentSegment.cs</Link>
+    </Compile>
+    <Compile Include="..\Common\Routing\PathLiteralSubsegment.cs">
+      <Link>Routing\PathLiteralSubsegment.cs</Link>
+    </Compile>
+    <Compile Include="..\Common\Routing\PathParameterSubsegment.cs">
+      <Link>Routing\PathParameterSubsegment.cs</Link>
+    </Compile>
+    <Compile Include="..\Common\Routing\PathSegment.cs">
+      <Link>Routing\PathSegment.cs</Link>
+    </Compile>
+    <Compile Include="..\Common\Routing\PathSeparatorSegment.cs">
+      <Link>Routing\PathSeparatorSegment.cs</Link>
+    </Compile>
+    <Compile Include="..\Common\Routing\PathSubsegment.cs">
+      <Link>Routing\PathSubsegment.cs</Link>
     </Compile>
     <Compile Include="AdditionalMetaDataAttribute.cs" />
     <Compile Include="AllowAnonymousAttribute.cs" />
     <Compile Include="ActionDescriptorHelper.cs" />
+    <Compile Include="Async\BeginInvokeDelegateOfTState.cs" />
     <Compile Include="Async\TaskAsyncActionDescriptor.cs" />
     <Compile Include="Async\TaskWrapperAsyncResult.cs" />
+    <Compile Include="Filters\AuthenticationChallengeContext.cs" />
+    <Compile Include="Filters\AuthenticationContext.cs" />
     <Compile Include="BuildManagerCompiledView.cs" />
     <Compile Include="BuildManagerViewEngine.cs" />
     <Compile Include="CachedAssociatedMetadataProvider.cs" />
@@ -126,7 +215,13 @@
     <Compile Include="CancellationTokenModelBinder.cs" />
     <Compile Include="CompareAttributeAdapter.cs" />
     <Compile Include="DataTypeAttributeAdapter.cs" />
+    <Compile Include="Async\EndInvokeDelegateOfTResultTState.cs" />
+    <Compile Include="Async\EndInvokeVoidDelegate.cs" />
     <Compile Include="FileExtensionsAttributeAdapter.cs" />
+    <Compile Include="Filters\IAuthenticationFilter.cs" />
+    <Compile Include="Filters\IOverrideFilter.cs" />
+    <Compile Include="Html5DateRenderingMode.cs" />
+    <Compile Include="RouteAttribute.cs" />
     <Compile Include="MembershipPasswordAttributeAdapter.cs" />
     <Compile Include="CompareAttribute.cs" />
     <Compile Include="ChildActionValueProvider.cs" />
@@ -139,9 +234,22 @@
     <Compile Include="Html\DisplayNameExtensions.cs" />
     <Compile Include="Html\NameExtensions.cs" />
     <Compile Include="Html\ValueExtensions.cs" />
+    <Compile Include="OverrideActionFiltersAttribute.cs" />
+    <Compile Include="OverrideAuthenticationAttribute.cs" />
+    <Compile Include="OverrideAuthorizationAttribute.cs" />
+    <Compile Include="OverrideExceptionFiltersAttribute.cs" />
+    <Compile Include="OverrideResultFiltersAttribute.cs" />
     <Compile Include="Razor\MvcCSharpRazorCodeGenerator.cs" />
     <Compile Include="Razor\SetModelTypeCodeGenerator.cs" />
     <Compile Include="ReflectedAttributeCache.cs" />
+    <Compile Include="RouteAreaAttribute.cs" />
+    <Compile Include="Routing\AttributeRoutingMapper.cs" />
+    <Compile Include="Routing\DirectRouteExtensions.cs" />
+    <Compile Include="Routing\IRouteInfoProvider.cs" />
+    <Compile Include="Routing\RouteBuilder.cs" />
+    <Compile Include="Routing\RouteCollectionAttributeRoutingExtensions.cs" />
+    <Compile Include="RoutePrefixAttribute.cs" />
+    <Compile Include="Routing\RouteDataTokenKeys.cs" />
     <Compile Include="SessionStateAttribute.cs" />
     <Compile Include="AllowHtmlAttribute.cs" />
     <Compile Include="UnvalidatedRequestValuesAccessor.cs" />
@@ -199,8 +307,6 @@
     <Compile Include="SingleServiceResolver.cs" />
     <Compile Include="Razor\StartPageLookupDelegate.cs" />
     <Compile Include="TagBuilderExtensions.cs" />
-    <Compile Include="UrlRewriterHelper.cs" />
-    <Compile Include="ValidationAttributeHelpers.cs" />
     <Compile Include="ViewStartPage.cs" />
     <Compile Include="WebViewPage.cs" />
     <Compile Include="WebViewPageOfTModel.cs" />
@@ -223,7 +329,6 @@
     <Compile Include="Async\AsyncResultWrapper.cs" />
     <Compile Include="Async\AsyncVoid.cs" />
     <Compile Include="AsyncController.cs" />
-    <Compile Include="Async\AsyncUtil.cs" />
     <Compile Include="Async\IAsyncController.cs" />
     <Compile Include="Async\IAsyncActionInvoker.cs" />
     <Compile Include="Async\IAsyncManagerContainer.cs" />
@@ -255,7 +360,6 @@
     <Compile Include="Async\Trigger.cs" />
     <Compile Include="Async\TriggerListener.cs" />
     <Compile Include="Async\SimpleAsyncResult.cs" />
-    <Compile Include="Async\EndInvokeDelegate.cs" />
     <Compile Include="Async\EndInvokeDelegateOfTResult.cs" />
     <Compile Include="Async\SynchronizationContextUtil.cs" />
     <Compile Include="AuthorizationContext.cs" />
@@ -319,7 +423,6 @@
     <Compile Include="Html\LabelExtensions.cs" />
     <Compile Include="Html\TemplateHelpers.cs" />
     <Compile Include="HttpPostAttribute.cs" />
-    <Compile Include="PathHelpers.cs" />
     <Compile Include="ExceptionContext.cs" />
     <Compile Include="ResultExecutedContext.cs" />
     <Compile Include="ResultExecutingContext.cs" />
@@ -480,17 +583,12 @@
     <Compile Include="WebFormView.cs" />
     <Compile Include="WebFormViewEngine.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
-    <Compile Include="Properties\MvcResources.Designer.cs">
-      <AutoGen>True</AutoGen>
-      <DesignTime>True</DesignTime>
-      <DependentUpon>MvcResources.resx</DependentUpon>
-    </Compile>
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="Properties\MvcResources.resx">
       <Generator>ResXFileCodeGenerator</Generator>
-      <LastGenOutput>MvcResources.Designer.cs</LastGenOutput>
       <SubType>Designer</SubType>
+      <LastGenOutput>MvcResources.Designer.cs</LastGenOutput>
     </EmbeddedResource>
   </ItemGroup>
   <ItemGroup>
@@ -511,10 +609,11 @@
     </ProjectReference>
   </ItemGroup>
   <ItemGroup>
-    <None Include="packages.config" />
     <None Include="JavaScript\jquery.unobtrusive-ajax.js" />
     <None Include="JavaScript\jquery.validate.unobtrusive.js" />
+    <None Include="packages.config" />
   </ItemGroup>
+  <ItemGroup />
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <Target Name="AfterBuild">
     <ItemGroup>
@@ -522,5 +621,4 @@
     </ItemGroup>
     <Copy SourceFiles="@(ScriptFiles)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" />
   </Target>
-  <Import Project="$(SolutionDir)\.nuget\nuget.targets" />
 </Project>
