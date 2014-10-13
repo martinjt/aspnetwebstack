@@ -20,7 +20,7 @@ Start of WebStack targets Copy
     <FileAlignment>512</FileAlignment>
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
-    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
     <!-- Variables for output redirection (localization, signing, etc)-->
     <Language Condition=" '$(Language)' == '' ">ENU</Language>
     <LocalizedPath Condition=" '$(LocalizedPath)' == '' " />

@@ -12,6 +12,8 @@ Start of WebStack targets Copy
     <CustomAfterMicrosoftCommonTargets>$(WebStackToolsPath)WebStack.targets</CustomAfterMicrosoftCommonTargets>
     <!-- Force rebuild if this file changes -->
     <MSBuildAllProjects>$(MSBuildAllProjects);$(MSBuildThisFileFullPath)</MSBuildAllProjects>
+    <ProductVersion>12.0.0</ProductVersion>
+    <SchemaVersion>2.0</SchemaVersion>
   </PropertyGroup>
   <PropertyGroup>
     <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
@@ -20,7 +22,7 @@ Start of WebStack targets Copy
     <FileAlignment>512</FileAlignment>
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
-    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
     <!-- Variables for output redirection (localization, signing, etc)-->
     <Language Condition=" '$(Language)' == '' ">ENU</Language>
     <LocalizedPath Condition=" '$(LocalizedPath)' == '' " />
@@ -39,16 +41,20 @@ Start of WebStack targets Copy
     <DebugType>full</DebugType>
     <Optimize>false</Optimize>
     <DefineConstants>TRACE;DEBUG;CODE_ANALYSIS</DefineConstants>
+    <OutputPath>..\..\bin\$(Configuration)\Test\</OutputPath>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
     <DebugType>pdbonly</DebugType>
     <Optimize>true</Optimize>
     <DefineConstants>TRACE</DefineConstants>
+    <OutputPath>..\..\bin\$(Configuration)\Test\</OutputPath>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'CodeAnalysis|AnyCPU' ">
     <DebugType>pdbonly</DebugType>
     <Optimize>true</Optimize>
     <DefineConstants>TRACE;CODE_ANALYSIS</DefineConstants>
+    <OutputPath>..\..\bin\$(Configuration)\Test\</OutputPath>
   </PropertyGroup>
   <!--
 End of WebStack targets Copy
@@ -66,22 +72,21 @@ End of WebStack targets Copy
       <HintPath>..\..\packages\Facebook.6.1.4\lib\net45\Facebook.dll</HintPath>
     </Reference>
     <Reference Include="Microsoft.CSharp" />
-    <Reference Include="Moq, Version=4.0.10827.0, Culture=neutral, PublicKeyToken=69f491c39445e920, processorArchitecture=MSIL">
-      <HintPath>..\..\packages\Moq.4.0.10827\lib\NET40\Moq.dll</HintPath>
-    </Reference>
-    <Reference Include="Newtonsoft.Json, Version=6.0.0.0, Culture=neutral, PublicKeyToken=30ad4fe6b2a6aeed, processorArchitecture=MSIL">
-      <SpecificVersion>False</SpecificVersion>
-      <HintPath>..\..\packages\Newtonsoft.Json.6.0.4\lib\net45\Newtonsoft.Json.dll</HintPath>
-    </Reference>
     <Reference Include="System" />
     <Reference Include="System.Net.Http" />
     <Reference Include="System.Web" />
     <Reference Include="System.Xml" />
-    <Reference Include="xunit, Version=1.9.1.1600, Culture=neutral, PublicKeyToken=8d05b1bb7a6fdb6c, processorArchitecture=MSIL">
+    <Reference Include="Moq, Version=4.0.10827.0, Culture=neutral, PublicKeyToken=69f491c39445e920">
+      <HintPath>..\..\packages\Moq.4.0.10827\lib\NET40\Moq.dll</HintPath>
+    </Reference>
+    <Reference Include="Newtonsoft.Json">
+      <HintPath>..\..\packages\Newtonsoft.Json.6.0.4\lib\net45\Newtonsoft.Json.dll</HintPath>
+    </Reference>
+    <Reference Include="xunit, Version=1.9.1.1600, Culture=neutral, PublicKeyToken=8d05b1bb7a6fdb6c">
       <HintPath>..\..\packages\xunit.1.9.1\lib\net20\xunit.dll</HintPath>
       <Aliases>unused</Aliases>
     </Reference>
-    <Reference Include="xunit.extensions, Version=1.9.1.1600, Culture=neutral, PublicKeyToken=8d05b1bb7a6fdb6c, processorArchitecture=MSIL">
+    <Reference Include="xunit.extensions, Version=1.9.1.1600, Culture=neutral, PublicKeyToken=8d05b1bb7a6fdb6c">
       <HintPath>..\..\packages\xunit.extensions.1.9.1\lib\net20\xunit.extensions.dll</HintPath>
       <Aliases>unused</Aliases>
     </Reference>
@@ -119,43 +124,43 @@ End of WebStack targets Copy
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\Microsoft.AspNet.Facebook\Microsoft.AspNet.Facebook.csproj">
-      <Project>{821a136c-7c6f-44c6-a9e6-c39b5bfb1483}</Project>
+      <Project>{821A136C-7C6F-44C6-A9E6-C39B5BFB1483}</Project>
       <Name>Microsoft.AspNet.Facebook</Name>
     </ProjectReference>
     <ProjectReference Include="..\..\src\System.Net.Http.Formatting\System.Net.Http.Formatting.csproj">
-      <Project>{668e9021-ce84-49d9-98fb-df125a9fcdb0}</Project>
+      <Project>{668E9021-CE84-49D9-98FB-DF125A9FCDB0}</Project>
       <Name>System.Net.Http.Formatting</Name>
     </ProjectReference>
     <ProjectReference Include="..\..\src\System.Web.Helpers\System.Web.Helpers.csproj">
-      <Project>{9b7e3740-6161-4548-833c-4bbca43b970e}</Project>
+      <Project>{9B7E3740-6161-4548-833C-4BBCA43B970E}</Project>
       <Name>System.Web.Helpers</Name>
     </ProjectReference>
     <ProjectReference Include="..\..\src\System.Web.Http\System.Web.Http.csproj">
-      <Project>{ddc1ce0c-486e-4e35-bb3b-eab61f8f9440}</Project>
+      <Project>{DDC1CE0C-486E-4E35-BB3B-EAB61F8F9440}</Project>
       <Name>System.Web.Http</Name>
     </ProjectReference>
     <ProjectReference Include="..\..\src\System.Web.Mvc\System.Web.Mvc.csproj">
-      <Project>{3d3ffd8a-624d-4e9b-954b-e1c105507975}</Project>
+      <Project>{3D3FFD8A-624D-4E9B-954B-E1C105507975}</Project>
       <Name>System.Web.Mvc</Name>
     </ProjectReference>
     <ProjectReference Include="..\..\src\System.Web.Razor\System.Web.Razor.csproj">
-      <Project>{8f18041b-9410-4c36-a9c5-067813df5f31}</Project>
+      <Project>{8F18041B-9410-4C36-A9C5-067813DF5F31}</Project>
       <Name>System.Web.Razor</Name>
     </ProjectReference>
     <ProjectReference Include="..\..\src\System.Web.WebPages.Deployment\System.Web.WebPages.Deployment.csproj">
-      <Project>{22babb60-8f02-4027-affc-acf069954536}</Project>
+      <Project>{22BABB60-8F02-4027-AFFC-ACF069954536}</Project>
       <Name>System.Web.WebPages.Deployment</Name>
     </ProjectReference>
     <ProjectReference Include="..\..\src\System.Web.WebPages.Razor\System.Web.WebPages.Razor.csproj">
-      <Project>{0939b11a-fe4e-4ba1-8ad6-d97741ee314f}</Project>
+      <Project>{0939B11A-FE4E-4BA1-8AD6-D97741EE314F}</Project>
       <Name>System.Web.WebPages.Razor</Name>
     </ProjectReference>
     <ProjectReference Include="..\..\src\System.Web.WebPages\System.Web.WebPages.csproj">
-      <Project>{76efa9c5-8d7e-4fdf-b710-e20f8b6b00d2}</Project>
+      <Project>{76EFA9C5-8D7E-4FDF-B710-E20F8B6B00D2}</Project>
       <Name>System.Web.WebPages</Name>
     </ProjectReference>
     <ProjectReference Include="..\Microsoft.TestCommon\Microsoft.TestCommon.csproj">
-      <Project>{fccc4cb7-baf7-4a57-9f89-e5766fe536c0}</Project>
+      <Project>{FCCC4CB7-BAF7-4A57-9F89-E5766FE536C0}</Project>
       <Name>Microsoft.TestCommon</Name>
     </ProjectReference>
   </ItemGroup>
